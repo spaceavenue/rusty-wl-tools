@@ -1,0 +1,17 @@
+cargo-features = ["panic-immediate-abort"]
+
+[package]
+name = "rustbg"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+libc = { version = "0.2.186", default-features = false }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+debug = "none"
+strip = true
+panic = "immediate-abort"
