@@ -1,5 +1,5 @@
 # What
-This is a small and simple Rust-based client for setting the wallpaper on wayland, using the wlr-layer-shell protocol. It can also optionally set the output color temperature using the wlr-gamma-control protocol. Image loading and decoding is handled by `ffmpeg`, so you need to have it installed on your system for the wallpaper to work.
+This is a small and simple Rust-based client for setting the wallpaper on wayland, using the wlr-layer-shell protocol. Image loading and decoding is handled by `ffmpeg`, so you need to have it installed on your system for the wallpaper to work.
 
 It is statically linked with musl (or at least I do it that way), and uses `#![no_std]` to completely eliminate the stdlib from the binary. Thus it also uses no external crates like `wayland-client` or even `wayland-sys`, and relies solely on reading from and writing to the wayland socket to communicate with the server.
 

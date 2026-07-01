@@ -7,7 +7,6 @@ pub struct Output {
     pub output_id: u32,
     pub wl_surface_id: u32,
     pub layer_surface_id: u32,
-    pub gamma_control_id: u32,
     pub buffer_id: u32,
     pub width: u32,
     pub height: u32,
@@ -18,7 +17,6 @@ pub struct Config {
     pub image_path: Option<*const libc::c_char>,
     pub namespace: *const libc::c_char,
     pub fill: bool,
-    pub temp: Option<f64>,
 }
 // default config
 impl Default for Config {
@@ -27,7 +25,6 @@ impl Default for Config {
             image_path: Some(c"image.png".as_ptr() as *const libc::c_char),
             namespace: c"wallpaper".as_ptr() as *const libc::c_char,
             fill: false,
-            temp: None,
         }
     }
 }
@@ -147,15 +144,6 @@ impl State {
                 msg.write_u32(self.wayland.layer_shell_id);
                 self.wayland.send(&msg.finalize(), None);
             }
-            b"zwlr_gamma_control_manager_v1" => {
-                self.wayland.gamma_manager_id = self.wayland.alloc_id();
-                let mut msg = wayland::Message::new(2, 0);
-                msg.write_u32(name);
-                msg.write_string(b"zwlr_gamma_control_manager_v1");
-                msg.write_u32(bind(1));
-                msg.write_u32(self.wayland.gamma_manager_id);
-                self.wayland.send(&msg.finalize(), None);
-            }
             b"wl_output" => {
                 if self.output_len >= 4 {
                     return;
@@ -173,7 +161,6 @@ impl State {
                     output_id: out_id,
                     wl_surface_id: 0,
                     layer_surface_id: 0,
-                    gamma_control_id: 0,
                     buffer_id: 0,
                     width: 0,
                     height: 0,
@@ -234,15 +221,14 @@ impl State {
                 return false;
             }
 
-            // check if this event belongs to any of our bound layer surfaces or gamma control
-            // objects
+            // check if this event belongs to any of our bound layer surface objects
             let mut match_found = false;
             let mut out_idx = 0;
             for i in 0..4 {
                 let Some(ref output) = self.outputs[i] else {
                     break;
                 };
-                if (output.layer_surface_id) == sender || output.gamma_control_id == sender {
+                if (output.layer_surface_id) == sender {
                     match_found = true;
                     out_idx = i;
                     break;
@@ -259,7 +245,7 @@ impl State {
     }
 
     // dispatch individual events for a specific output.handles surface configuration events like
-    // setting the wallpaper and gamma size events, like applying temperature
+    // setting the wallpaper
     fn dispatch_single_event(
         &mut self,
         buf: &[u8],
@@ -350,28 +336,6 @@ impl State {
                     &wayland::Message::new(target_out.wl_surface_id, 6).finalize(),
                     None,
                 );
-            }
-            // event matches a bound gamma control object
-            val if val == out.gamma_control_id => {
-                if opcode != 0 {
-                    // 0 -> zwlr_gamma_control_v1::gamma_size
-                    return;
-                }
-                let size = read_u32(buf, idx + 8) as usize; // size of gamma ramps
-                let Some(temp) = self.config.temp else {
-                    return;
-                };
-                // generate and write the gamma ramps to a memfd
-                let Ok(g_fd) = shm::get_gamma_table_fd(size, temp) else {
-                    return;
-                };
-                // apply gamma ramps to output
-                // zwlr_gamma_control_v1 (ID) -> request opcode 0 (set_gamma)
-                let msg = wayland::Message::new(out.gamma_control_id, 0);
-                self.wayland.send(&msg.finalize(), Some(g_fd));
-                unsafe {
-                    libc::close(g_fd); // client no longer needs the fd after sending
-                }
             }
             _ => return,
         }

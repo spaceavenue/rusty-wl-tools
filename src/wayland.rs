@@ -109,8 +109,6 @@ pub struct Wayland {
     pub shm_id: u32,
     // zwlr_layer_shell_v1 global id
     pub layer_shell_id: u32,
-    // zwlr_gamma_control_manager_v1 global id
-    pub gamma_manager_id: u32,
     // next object id to assign
     next_id: u32,
 }
@@ -221,7 +219,6 @@ impl Wayland {
             compositor_id: 0,
             shm_id: 0,
             layer_shell_id: 0,
-            gamma_manager_id: 0,
             // IDs 1 -> display, 2 -> registry, 3 -> sync callback. so next id is 4
             // for some reason this not being sequential was causing errors even though the protocol
             // says the ids can have gaps in them. maybe compositor specific
