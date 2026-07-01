@@ -26,11 +26,6 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
                 }
                 config.namespace = unsafe { optarg }
             }
-            't' => {
-                if !unsafe { optarg.is_null() } {
-                    unsafe { config.temp = Some(libc::strtod(optarg, core::ptr::null_mut())) }
-                }
-            }
             _ => (),
         }
     }
@@ -63,7 +58,6 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
         // objects.
         let surf_id = state.wayland.alloc_id();
         let layer_surf_id = state.wayland.alloc_id();
-        let gamma_ctrl_id = state.wayland.alloc_id();
 
         let output_id = match state.outputs[i] {
             Some(ref o) => o.output_id,
@@ -114,28 +108,20 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
             .wayland
             .send(&Message::new(surf_id, 6).finalize(), None);
 
-        // request gamma control
-        // zwlr_gamma_control_manager_v1 (ID) -> request opcode 0 (get_gamma_control)
-        let mut gamma_msg = Message::new(state.wayland.gamma_manager_id, 0);
-        gamma_msg.write_u32(gamma_ctrl_id);
-        gamma_msg.write_u32(output_id);
-        state.wayland.send(&gamma_msg.finalize(), None);
-
         // store the allocated ids back into our Output instance
         if let Some(ref mut out) = state.outputs[i] {
             out.wl_surface_id = surf_id;
             out.layer_surface_id = layer_surf_id;
-            out.gamma_control_id = gamma_ctrl_id;
         }
     }
 
+    // probably doesnt even do anything atp
+    // (not like it did before either, madvise is just a "strong suggestion")
+    // but still, for the illusion ig :3
+    // also the name is kinda funny
+    remove_self::evict_self_from_ram();
+
     // main wayland event dispatch loop
-    while state.process_runtime_events() {
-        // probably doesnt even do anything atp
-        // (not like it did before either, madvise is just a "strong suggestion")
-        // but still, for the illusion ig :3
-        // also the name is kinda funny
-        remove_self::evict_self_from_ram();
-    }
+    while state.process_runtime_events() {}
     0
 }
