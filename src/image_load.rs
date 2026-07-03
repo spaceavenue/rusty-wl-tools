@@ -3,13 +3,13 @@ use crate::{AppError, file_err, image_err};
 
 // build strings dynamically on the stack, no heap allocation needed
 struct StringOnStack {
-    buffer: [u8; 96],
+    buffer: [u8; 8],
     len: usize,
 }
 impl StringOnStack {
     fn new() -> Self {
         StringOnStack {
-            buffer: [0; 96],
+            buffer: [0; 8],
             len: 0,
         }
     }
@@ -38,41 +38,10 @@ impl StringOnStack {
     }
 }
 
-// ffmpeg filter string based on output aspect ratio and fit/fill mode
-fn get_ffmpeg_filter(width: usize, height: usize, fill: bool) -> StringOnStack {
-    let mut filter = StringOnStack::new();
-
-    filter.push_str(b"scale=");
-    filter.push_usize(width);
-    filter.push_str(b":");
-    filter.push_usize(height);
-
-    match fill {
-        true => {
-            // scale and center crop to fill the output resolution
-            filter.push_str(b":force_original_aspect_ratio=increase,crop=");
-            filter.push_usize(width);
-            filter.push_str(b":");
-            filter.push_usize(height);
-        }
-        false => {
-            // scale and pad with black bars to fit inside the output resolution
-            filter.push_str(b":force_original_aspect_ratio=decrease,pad=");
-            filter.push_usize(width);
-            filter.push_str(b":");
-            filter.push_usize(height);
-            filter.push_str(b":(ow-iw)/2:(oh-ih)/2");
-        }
-    }
-    filter.buffer[filter.len] = b'\0'; // null terminate because C
-
-    filter
-}
-
 // this was a bit hard to follow so im documenting for my own reference
 // we:
 // 1. create a unix pipe
-// 2. spawn the ffmpeg child process (fork + execvp)
+// 2. spawn the dump-bgra child process (fork + execvp)
 // 3. connect it's write end (stdout) to the write end of the pipe
 // 4. then read the raw bgra pixels from our read end, directly into the mmap_slice
 pub fn load_and_scale(
@@ -84,7 +53,16 @@ pub fn load_and_scale(
     let Some(path) = state.config.image_path else {
         return Err(file_err());
     };
-    let filter = get_ffmpeg_filter(out_width as usize, out_height as usize, state.config.fill);
+    let mut w_str = StringOnStack::new();
+    w_str.push_usize(out_width as usize);
+    let mut h_str = StringOnStack::new();
+    h_str.push_usize(out_height as usize);
+    let mut mode_str = StringOnStack::new();
+    if state.config.fill {
+        mode_str.push_str(b"fill\0");
+    } else {
+        mode_str.push_str(b"fit\0");
+    }
 
     unsafe {
         let mut pipe = [0i32; 2];
@@ -115,20 +93,16 @@ pub fn load_and_scale(
             }
 
             // build ffmpeg argument vector: scale image to raw bgra pixels and stream to stdout
-            let argv: [*const libc::c_char; 11] = [
-                c"ffmpeg".as_ptr(),
-                c"-i".as_ptr(),
+            let argv: [*const libc::c_char; 7] = [
+                c"dump-bgra".as_ptr(),
+                w_str.buffer.as_ptr() as _,
+                h_str.buffer.as_ptr() as _,
+                mode_str.buffer.as_ptr() as _,
                 path,
-                c"-vf".as_ptr(),
-                filter.buffer.as_ptr() as _,
-                c"-f".as_ptr(),
-                c"rawvideo".as_ptr(),
-                c"-pix_fmt".as_ptr(),
-                c"bgra".as_ptr(),
                 c"-".as_ptr(),
                 core::ptr::null(),
             ];
-            libc::execvp(c"ffmpeg".as_ptr(), argv.as_ptr());
+            libc::execvp(c"dump-bgra".as_ptr(), argv.as_ptr());
             libc::_exit(1); // if execvp failed, kill child >:)
         }
 

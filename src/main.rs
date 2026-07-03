@@ -9,9 +9,11 @@ unsafe extern "C" {
     static optarg: *const libc::c_char;
     static mut optind: libc::c_int;
 }
+#[link(name = "c", kind = "static")]
+unsafe extern "C" {}
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_int {
+pub extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_int {
     let mut config = Config::default();
     loop {
         let c = unsafe { libc::getopt(argc as i32, argv, c"fn:t:".as_ptr()) };

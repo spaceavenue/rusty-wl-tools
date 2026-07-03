@@ -1,3 +1,5 @@
+#![no_std]
+
 pub mod image_load;
 pub mod remove_self;
 pub mod shm;
