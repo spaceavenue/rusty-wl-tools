@@ -1,9 +1,15 @@
 #![no_std]
 #![no_main]
 
+use rustbg::remove_self;
 use rustbg::state::{Config, State};
-use rustbg::wayland::Message;
-use rustbg::{remove_self, write_err};
+use wllib::dispatch::dispatch_once;
+use wllib::error::WireError::ConnectionClosed;
+use wllib::fmt_lite::write_stderr;
+use wllib::protocols::{wl_compositor, wl_surface, zwlr_layer_shell_v1, zwlr_layer_surface_v1};
+use wllib::registry::crawl;
+use wllib::transport::Connection;
+use wllib::wire::Message;
 
 unsafe extern "C" {
     static optarg: *const libc::c_char;
@@ -37,18 +43,24 @@ pub extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_i
     }
 
     if config.image_path.is_none() {
-        write_err(b"Usage: rustbg [-f | --fill] [-n | --namespace <name>] <image path>\n");
+        write_stderr(b"Usage: rustbg [-f | --fill] [-n | --namespace <name>] <image path>\n");
         unsafe { libc::exit(1) };
     }
 
-    // initialize the state. connection to the wayland compositor and registry init all happens
-    // here.
-    let Ok(mut state) = State::init(config) else {
-        write_err(b"failed to init state\n");
-        unsafe { libc::exit(1) };
+    let mut conn = match Connection::connect() {
+        Ok(c) => c,
+        Err(e) => {
+            e.write_diagnostic();
+            unsafe { libc::exit(1) };
+        }
     };
 
-    state.read_and_parse_registry();
+    let mut state = State::init(config);
+
+    if let Err(e) = crawl(&mut conn, &mut state) {
+        e.write_diagnostic();
+        unsafe { libc::exit(1) };
+    }
 
     // setup layer surfaces and gamma control for all monitors.
     for i in 0..4 {
@@ -58,9 +70,8 @@ pub extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_i
 
         // alloc ids for the new wl_surface (from compositor), layer surface, and gamma control
         // objects.
-        let surf_id = state.wayland.alloc_id();
-        let layer_surf_id = state.wayland.alloc_id();
-
+        let surf_id = conn.alloc_id();
+        let layer_surf_id = conn.alloc_id();
         let output_id = match state.outputs[i] {
             Some(ref o) => o.output_id,
             None => continue,
@@ -69,46 +80,49 @@ pub extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_i
         // this is a multi step process
         //
         // 1. creates a wl_surface
-        // wl_compositor (ID) -> request opcode 0 (create_surface)
-        let mut surf_msg = Message::new(state.wayland.compositor_id, 0);
+        let mut surf_msg = Message::new(
+            state.global.compositor_id,
+            wl_compositor::request::CREATE_SURFACE,
+        );
         surf_msg.write_u32(surf_id);
-        state.wayland.send(&surf_msg.finalize(), None);
+        conn.send_logged(&surf_msg, None);
 
         // 2. wrap the wl_surface as a layer surface
-        // zwlr_layer_shell_v1 (ID) -> request opcode 0 (get_layer_surface)
-        let mut ls_msg = Message::new(state.wayland.layer_shell_id, 0);
+        let mut ls_msg = Message::new(
+            state.global.layer_shell_id,
+            zwlr_layer_shell_v1::request::GET_LAYER_SURFACE,
+        );
         ls_msg.write_u32(layer_surf_id);
         ls_msg.write_u32(surf_id);
         ls_msg.write_u32(output_id);
-        ls_msg.write_u32(0); // 0 -> background layer
+        ls_msg.write_u32(zwlr_layer_shell_v1::layer::BACKGROUND);
         ls_msg.write_cstr(state.config.namespace);
-        state.wayland.send(&ls_msg.finalize(), None);
+        conn.send_logged(&ls_msg, None);
 
         // anchor to all edges for full screen
-        // zwlr_layer_surface_v1 (ID) -> request opcode 1 (set_anchor)
-        let mut anchor_msg = Message::new(layer_surf_id, 1);
-        anchor_msg.write_u32(15); // 15 -> achor to: top | bottom | left | right (1 | 2 | 4 | 8 = 15)
-        state.wayland.send(&anchor_msg.finalize(), None);
+        let mut anchor_msg =
+            Message::new(layer_surf_id, zwlr_layer_surface_v1::request::SET_ANCHOR);
+        anchor_msg.write_u32(zwlr_layer_surface_v1::anchor::ALL);
+        conn.send_logged(&anchor_msg, None);
 
         // configure exclusive zone to go behind other layer surfaces, like panels or status bars
-        // zwlr_layer_surface_v1 (ID) -> request opcode 2 (set_exclusive_zone)
-        let mut ex_msg = Message::new(layer_surf_id, 2);
-        ex_msg.write_i32(-1); // -1 means do not request any exclusive zone.
-        state.wayland.send(&ex_msg.finalize(), None);
+        let mut ex_msg = Message::new(
+            layer_surf_id,
+            zwlr_layer_surface_v1::request::SET_EXCLUSIVE_ZONE,
+        );
+        // -1 -> do not request any exclusive zone.
+        ex_msg.write_i32(-1);
+        conn.send_logged(&ex_msg, None);
 
-        // initial attach (attaching 0 or NULL tells compositor to map surface)
-        // wl_surface (ID) -> request opcode 1 (attach)
-        let mut attach_msg = Message::new(surf_id, 1);
-        attach_msg.write_u32(0); // NULL -> map surface
+        // initial attach
+        let mut attach_msg = Message::new(surf_id, wl_surface::request::ATTACH);
+        // NULL -> map surface
+        attach_msg.write_u32(0);
         attach_msg.write_i32(0);
         attach_msg.write_i32(0);
-        state.wayland.send(&attach_msg.finalize(), None);
-
+        conn.send_logged(&attach_msg, None);
         // commit initial surface
-        // wl_surface (ID) -> request opcode 6 (commit)
-        state
-            .wayland
-            .send(&Message::new(surf_id, 6).finalize(), None);
+        conn.send_logged(&Message::new(surf_id, wl_surface::request::COMMIT), None);
 
         // store the allocated ids back into our Output instance
         if let Some(ref mut out) = state.outputs[i] {
@@ -116,7 +130,7 @@ pub extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_i
             out.layer_surface_id = layer_surf_id;
         }
     }
-
+    // NULL -> map surface
     // probably doesnt even do anything atp
     // (not like it did before either, madvise is just a "strong suggestion")
     // but still, for the illusion ig :3
@@ -124,6 +138,15 @@ pub extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_i
     remove_self::evict_self_from_ram();
 
     // main wayland event dispatch loop
-    while state.process_runtime_events() {}
+    loop {
+        match dispatch_once(&mut conn, &mut state) {
+            Ok(_) => (),
+            Err(ConnectionClosed) => break,
+            Err(e) => {
+                e.write_diagnostic();
+                break;
+            }
+        }
+    }
     0
 }

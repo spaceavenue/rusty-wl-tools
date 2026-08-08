@@ -1,13 +1,17 @@
-use crate::state::State;
+use core::slice;
+
+use wllib::error::SysError;
+
+use crate::state::Config;
 use crate::{AppError, image_load};
 
 // create a memory-backed file, aka memfd, containing the scaled bgra pixel data and return its file
 // descriptor to the compositor. the memfd is mmap'ed to our virtual address space, and we pass it
 // as a byte slice to our image loading function. we then unmap it and send the fd back. the wayland
 // side turns it into a buffer
-pub fn get_image_fd(out_width: u32, out_height: u32, state: &mut State) -> Result<i32, AppError> {
-    if state.config.image_path.is_none() {
-        return Err(AppError::FileOpenError);
+pub fn get_image_fd(out_width: u32, out_height: u32, config: &Config) -> Result<i32, AppError> {
+    if config.image_path.is_none() {
+        return Err(AppError::MissingImagePath);
     };
     let stride = out_width * 4; // 4 bytes per pixel (BGRA)
     let size = (stride * out_height) as usize;
@@ -20,14 +24,16 @@ pub fn get_image_fd(out_width: u32, out_height: u32, state: &mut State) -> Resul
         )
     };
     if fd < 0 {
-        return Err(AppError::FileOpenError);
+        let err = SysError::last("memfd_create");
+        return Err(AppError::Sys(err));
     }
 
     unsafe {
         // set the file's size, equal to our output size
         if { libc::ftruncate(fd, size as libc::off_t) } < 0 {
+            let err = SysError::last("ftruncate");
             libc::close(fd);
-            return Err(AppError::FileOpenError);
+            return Err(AppError::Sys(err));
         }
 
         // map the in-memory file into our address space
@@ -40,17 +46,16 @@ pub fn get_image_fd(out_width: u32, out_height: u32, state: &mut State) -> Resul
             0,
         );
         if mmap_ptr == libc::MAP_FAILED {
+            let err = SysError::last("mmap");
             libc::close(fd);
-            return Err(AppError::SHMError);
+            return Err(AppError::Sys(err));
         }
 
-        let mmap_slice = core::slice::from_raw_parts_mut(mmap_ptr as *mut u8, size);
-
-        // spawn ffmpeg, fill the mmap'd region directly
-        image_load::load_and_scale(out_width, out_height, mmap_slice, state)?;
-
-        // unmap the address space. the data remains in the memfd
+        // get a byte slice from the mmap, spawn ffmpeg, fill the mmap'd region directly, unmap file
+        let mmap_slice = slice::from_raw_parts_mut(mmap_ptr as *mut u8, size);
+        let result = image_load::load_and_scale(out_width, out_height, mmap_slice, config);
         libc::munmap(mmap_ptr, size);
+        result?
     };
 
     Ok(fd)

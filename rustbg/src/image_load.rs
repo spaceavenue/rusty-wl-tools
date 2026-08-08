@@ -1,42 +1,8 @@
-use crate::state::State;
-use crate::{AppError, file_err, image_err};
+use wllib::error::SysError;
+use wllib::fmt_lite::StringOnStack;
 
-// build strings dynamically on the stack, no heap allocation needed
-struct StringOnStack {
-    buffer: [u8; 8],
-    len: usize,
-}
-impl StringOnStack {
-    fn new() -> Self {
-        StringOnStack {
-            buffer: [0; 8],
-            len: 0,
-        }
-    }
-    // push an integer converted to ASCII representation
-    fn push_usize(&mut self, mut num: usize) {
-        if num == 0 {
-            self.push_str(b"0");
-            return;
-        }
-        let mut tmp = [0u8; 10];
-        let mut idx = 10;
-        while num > 0 {
-            idx -= 1;
-            tmp[idx] = b'0' + (num % 10) as u8;
-            num /= 10;
-        }
-        self.push_str(&tmp[idx..10]);
-    }
-    // push a byte slice/string
-    fn push_str(&mut self, str: &[u8]) {
-        let new_len = self.len + str.len();
-        if new_len < 95 {
-            self.buffer[self.len..new_len].copy_from_slice(str);
-            self.len = new_len;
-        }
-    }
-}
+use crate::AppError;
+use crate::state::Config;
 
 // this was a bit hard to follow so im documenting for my own reference
 // we:
@@ -48,20 +14,20 @@ pub fn load_and_scale(
     out_width: u32,
     out_height: u32,
     buffer: &mut [u8],
-    state: &mut State,
+    config: &Config,
 ) -> Result<(), AppError> {
-    let Some(path) = state.config.image_path else {
-        return Err(file_err());
+    let Some(path) = config.image_path else {
+        return Err(AppError::MissingImagePath);
     };
-    let mut w_str = StringOnStack::new();
-    w_str.push_usize(out_width as usize);
-    let mut h_str = StringOnStack::new();
-    h_str.push_usize(out_height as usize);
-    let mut mode_str = StringOnStack::new();
-    if state.config.fill {
-        mode_str.push_str(b"fill\0");
+    let mut w_str = StringOnStack::<10>::new();
+    w_str.push_u32(out_width);
+    let mut h_str = StringOnStack::<10>::new();
+    h_str.push_u32(out_height);
+    let mut mode_str = StringOnStack::<5>::new();
+    if config.fill {
+        mode_str.push_bytes(b"fill\0");
     } else {
-        mode_str.push_str(b"fit\0");
+        mode_str.push_bytes(b"fit\0");
     }
 
     unsafe {
@@ -69,14 +35,15 @@ pub fn load_and_scale(
         // create an unidirectional pipe to read data from child process
         // O_CLOEXEC closes the read/write ends in any other spawned children
         if libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC) != 0 {
-            return Err(file_err());
+            return Err(AppError::Sys(SysError::last("pipe2")));
         }
 
         let pid = libc::fork();
         if pid < 0 {
+            let err = SysError::last("fork");
             libc::close(pipe[0]);
             libc::close(pipe[1]);
-            return Err(file_err());
+            return Err(AppError::Sys(err));
         }
         // child process context
         if pid == 0 {
@@ -95,9 +62,9 @@ pub fn load_and_scale(
             // build ffmpeg argument vector: scale image to raw bgra pixels and stream to stdout
             let argv: [*const libc::c_char; 7] = [
                 c"dump-bgra".as_ptr(),
-                w_str.buffer.as_ptr() as _,
-                h_str.buffer.as_ptr() as _,
-                mode_str.buffer.as_ptr() as _,
+                w_str.as_ptr() as _,
+                h_str.as_ptr() as _,
+                mode_str.as_ptr() as _,
                 path,
                 c"-".as_ptr(),
                 core::ptr::null(),
@@ -122,9 +89,10 @@ pub fn load_and_scale(
                 }
                 0 => break, // EOF reached
                 _ => {
+                    let err = SysError::last("read");
                     libc::close(pipe[0]);
                     libc::waitpid(pid, core::ptr::null_mut(), 0);
-                    return Err(image_err());
+                    return Err(AppError::Sys(err));
                 }
             }
         }
@@ -132,7 +100,7 @@ pub fn load_and_scale(
         libc::waitpid(pid, core::ptr::null_mut(), 0);
 
         if offset != buffer.len() {
-            return Err(image_err()); // failed to read complete frame size
+            return Err(AppError::ImageDecodeError); // failed to read complete frame size
         }
     }
     Ok(())
