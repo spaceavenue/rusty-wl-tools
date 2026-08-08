@@ -17,7 +17,7 @@ pub enum AppError {
     Wire(WireError),
     /// A libc syscall outside the wayland socket failed (memfd_create, mmap, pipe2, fork, ...).
     Sys(SysError),
-    /// ffmpeg produced fewer bytes than the expected `width * height * 4`.
+    /// dmp-bgra produced fewer bytes than the expected `width * height * 4`.
     ImageDecodeError,
     /// Attempted an operation that needs `config.image_path` before one was set.
     MissingImagePath,
@@ -29,7 +29,7 @@ impl AppError {
             AppError::Wire(e) => e.write_diagnostic(),
             AppError::Sys(e) => WireError::Sys(*e).write_diagnostic(),
             AppError::ImageDecodeError => fmt_lite::write_stderr(
-                b"[rustbg] image decode error: ffmpeg produced fewer bytes than expected\n",
+                b"[rustbg] image decode error: dump-bgra produced fewer bytes than expected\n",
             ),
             AppError::MissingImagePath => {
                 fmt_lite::write_stderr(b"[rustbg] no image path configured\n")
