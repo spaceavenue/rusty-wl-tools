@@ -1,5 +1,7 @@
+use wllib::wire::{Message, parse_header, read_u16, read_u32};
+
 use crate::wayland::Wayland;
-use crate::{AppError, read_u16, read_u32, shm, wayland, write_err, write_u32_err};
+use crate::{AppError, shm, wayland, write_err, write_u32_err};
 
 // abstration around wl_output
 pub struct Output {
@@ -70,9 +72,12 @@ impl State {
             let mut idx = 0;
             // iterate over all protocol messages received in this packet.
             while idx < bytes as usize {
-                let sender = read_u32(&buf, idx);
-                let opcode = read_u16(&buf, idx + 4);
-                let size = read_u16(&buf, idx + 6) as usize;
+                let Some(msg_hdr) = parse_header(&buf, idx) else {
+                    return;
+                };
+                let sender = msg_hdr.sender;
+                let opcode = msg_hdr.opcode;
+                let size = msg_hdr.size as usize;
                 if size == 0 {
                     break;
                 }
@@ -119,42 +124,42 @@ impl State {
         match interface {
             b"wl_compositor" => {
                 self.wayland.compositor_id = self.wayland.alloc_id();
-                let mut msg = wayland::Message::new(2, 0);
+                let mut msg = Message::new(2, 0);
                 msg.write_u32(name);
                 msg.write_string(b"wl_compositor");
                 msg.write_u32(bind(7));
                 msg.write_u32(self.wayland.compositor_id);
-                self.wayland.send(&msg.finalize(), None);
+                self.wayland.send(&msg, None);
             }
             b"wl_shm" => {
                 self.wayland.shm_id = self.wayland.alloc_id();
-                let mut msg = wayland::Message::new(2, 0);
+                let mut msg = Message::new(2, 0);
                 msg.write_u32(name);
                 msg.write_string(b"wl_shm");
                 msg.write_u32(bind(2));
                 msg.write_u32(self.wayland.shm_id);
-                self.wayland.send(&msg.finalize(), None);
+                self.wayland.send(&msg, None);
             }
             b"zwlr_layer_shell_v1" => {
                 self.wayland.layer_shell_id = self.wayland.alloc_id();
-                let mut msg = wayland::Message::new(2, 0);
+                let mut msg = Message::new(2, 0);
                 msg.write_u32(name);
                 msg.write_string(b"zwlr_layer_shell_v1");
                 msg.write_u32(bind(5));
                 msg.write_u32(self.wayland.layer_shell_id);
-                self.wayland.send(&msg.finalize(), None);
+                self.wayland.send(&msg, None);
             }
             b"wl_output" => {
                 if self.output_len >= 4 {
                     return;
                 }
                 let out_id = self.wayland.alloc_id();
-                let mut msg = wayland::Message::new(2, 0);
+                let mut msg = Message::new(2, 0);
                 msg.write_u32(name);
                 msg.write_string(b"wl_output");
                 msg.write_u32(bind(4));
                 msg.write_u32(out_id);
-                self.wayland.send(&msg.finalize(), None);
+                self.wayland.send(&msg, None);
 
                 self.outputs[self.output_len] = Some(Output {
                     global_name: name,
@@ -271,9 +276,9 @@ impl State {
 
                 // acknowledge the layer surface configuration
                 // zwlr_layer_surface_v1 (ID) -> request opcode 6 (ack_configure)
-                let mut ack = wayland::Message::new(out.layer_surface_id, 6);
+                let mut ack = Message::new(out.layer_surface_id, 6);
                 ack.write_u32(serial);
-                self.wayland.send(&ack.finalize(), None);
+                self.wayland.send(&ack, None);
 
                 // get the fd containing the scaled image data
                 let Ok(fd) = shm::get_image_fd(width, height, self) else {
@@ -287,55 +292,53 @@ impl State {
 
                 // create a shared memory pool
                 // wl_shm (ID) -> request opcode 0 (create_pool)
-                let mut pool_msg = wayland::Message::new(self.wayland.shm_id, 0);
+                let mut pool_msg = Message::new(self.wayland.shm_id, 0);
                 pool_msg.write_u32(pool_id);
                 pool_msg.write_i32((width * height * 4) as i32); // size = w * h * 4 bytes
-                self.wayland.send(&pool_msg.finalize(), Some(fd));
+                self.wayland.send(&pool_msg, Some(fd));
                 unsafe {
                     libc::close(fd); // client no longer needs the fd after sending
                 }
 
                 // create a wl_buffer from the pool
                 // wl_shm_pool (ID) -> request opcode 0 (create_buffer)
-                let mut buf_msg = wayland::Message::new(pool_id, 0);
+                let mut buf_msg = Message::new(pool_id, 0);
                 buf_msg.write_u32(buffer_id);
                 buf_msg.write_i32(0); // offset
                 buf_msg.write_i32(width as i32);
                 buf_msg.write_i32(height as i32);
                 buf_msg.write_i32((width * 4) as i32); // stride
                 buf_msg.write_u32(0); // 0 -> format: WL_SHM_FORMAT_ARGB8888
-                self.wayland.send(&buf_msg.finalize(), None);
+                self.wayland.send(&buf_msg, None);
 
                 // destroy the pool object, buffer remains valid tho
                 // wl_shm_pool (ID) -> request opcode 1 (destroy)
-                let destroy_pool = wayland::Message::new(pool_id, 1);
-                self.wayland.send(&destroy_pool.finalize(), None);
+                let destroy_pool = Message::new(pool_id, 1);
+                self.wayland.send(&destroy_pool, None);
 
                 target_out.buffer_id = buffer_id;
 
                 // attach the buffer to the surface
                 // wl_surface (ID) -> request opcode 1 (attach)
-                let mut attach = wayland::Message::new(target_out.wl_surface_id, 1);
+                let mut attach = Message::new(target_out.wl_surface_id, 1);
                 attach.write_u32(buffer_id as u32);
                 attach.write_i32(0); // x offset
                 attach.write_i32(0); // y offset
-                self.wayland.send(&attach.finalize(), None);
+                self.wayland.send(&attach, None);
 
                 // mark the entire surface as damaged
                 // wl_surface (ID) -> request opcode 9 (damage_buffer)
-                let mut dmg = wayland::Message::new(target_out.wl_surface_id, 9);
+                let mut dmg = Message::new(target_out.wl_surface_id, 9);
                 dmg.write_i32(0);
                 dmg.write_i32(0);
                 dmg.write_i32(width as i32);
                 dmg.write_i32(height as i32);
-                self.wayland.send(&dmg.finalize(), None);
+                self.wayland.send(&dmg, None);
 
                 // commit the state changes to the surface
                 // wl_surface (ID) -> request opcode 6 (commit)
-                self.wayland.send(
-                    &wayland::Message::new(target_out.wl_surface_id, 6).finalize(),
-                    None,
-                );
+                self.wayland
+                    .send(&Message::new(target_out.wl_surface_id, 6), None);
             }
             _ => return,
         }

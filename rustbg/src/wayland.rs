@@ -1,103 +1,10 @@
+use wllib::protocols::wl_callback::SYNC_CALLBACK_ID;
+use wllib::protocols::wl_display;
+use wllib::protocols::wl_display::DISPLAY_ID;
+use wllib::protocols::wl_registry::REGISTRY_ID;
+use wllib::wire::Message;
+
 use crate::{AppError, file_err};
-
-// structured wayland protocol message
-// wayland uses a format consisting of 32-bit aligned words
-pub struct Message {
-    // fixed 256 buffer bytes for raw message payload
-    pub data: [u8; 256],
-    // current length of the message in bytes
-    pub len: usize,
-}
-
-impl Message {
-    // create a new message targeting `obj_id` with request/event `opcode`
-    // header structure:
-    //   - bytes 0-3: 32-bit sender/destination object id
-    //   - bytes 4-5: 16-bit opcode (request/event identifier)
-    //   - bytes 6-7: 16-bit total message size in bytes (written by finalize)
-    pub fn new(obj_id: u32, opcode: u16) -> Self {
-        let mut msg = Self {
-            data: [0; 256],
-            len: 8, // header occupies first 8 bytes
-        };
-        msg.data[0..4].copy_from_slice(&obj_id.to_ne_bytes());
-        msg.data[4..6].copy_from_slice(&opcode.to_ne_bytes());
-        msg
-    }
-
-    // write a 32-bit unsigned integer to the message args
-    pub fn write_u32(&mut self, val: u32) {
-        if self.len + 4 > 256 {
-            return;
-        }
-        self.data[self.len..self.len + 4].copy_from_slice(&val.to_ne_bytes());
-        self.len += 4;
-    }
-
-    // write a 32-bit signed integer to the message args
-    pub fn write_i32(&mut self, val: i32) {
-        if self.len + 4 > 256 {
-            return;
-        }
-        self.data[self.len..self.len + 4].copy_from_slice(&val.to_ne_bytes());
-        self.len += 4;
-    }
-
-    // write a string to the args
-    // strings are serialized as:
-    //   - 32-bit length prefix (including the null terminator)
-    //   - string bytes (null-terminated)
-    //   - 0 byte padding to align the next arg to a 32-bit boundary
-    pub fn write_string(&mut self, s: &[u8]) {
-        let mut s_len = s.len() as u32;
-        if s.last() != Some(&0) {
-            s_len += 1;
-        }
-        self.write_u32(s_len);
-        let actual_len = if s.last() == Some(&0) {
-            s.len() - 1
-        } else {
-            s.len()
-        };
-
-        if self.len + actual_len + 1 <= 256 {
-            self.data[self.len..self.len + actual_len].copy_from_slice(&s[..actual_len]);
-            self.data[self.len + actual_len] = b'\0';
-            self.len += actual_len + 1;
-            // pad message length to multiple of 4 bytes/32-bits
-            self.len = (self.len + 3) & !3;
-        }
-    }
-
-    // write a raw c-string to the payload (mostly used by c ptrs in cli args)
-    pub fn write_cstr(&mut self, s: *const libc::c_char) {
-        unsafe {
-            let mut len = 0usize;
-            while *s.add(len) != 0 {
-                len += 1;
-            }
-            self.write_u32((len + 1) as u32);
-            if self.len + len + 1 <= 256 {
-                core::ptr::copy_nonoverlapping(
-                    s as *const u8,
-                    self.data.as_mut_ptr().add(self.len),
-                    len,
-                );
-            }
-            self.data[self.len + len] = b'\0';
-            self.len += len + 1;
-            // pad message length to multiple of 4 bytes/32-bits
-            self.len = (self.len + 3) & !3;
-        }
-    }
-
-    // write the final size to bytes 6-7 (heh) of the header, return the Message
-    pub fn finalize(mut self) -> Self {
-        let total_size = self.len as u16;
-        self.data[6..8].copy_from_slice(&total_size.to_ne_bytes());
-        self
-    }
-}
 
 // qanages the Unix socket connection, tracks registered object ids
 pub struct Wayland {
@@ -125,8 +32,8 @@ impl Wayland {
     // unix domain socket ancillary data aka `SCM_RIGHTS`
     pub fn send(&self, msg: &Message, fd: Option<libc::c_int>) {
         let mut iov = libc::iovec {
-            iov_base: msg.data.as_ptr() as *mut libc::c_void,
-            iov_len: msg.len,
+            iov_base: msg.as_bytes().as_ptr() as *mut libc::c_void,
+            iov_len: msg.header().size as usize,
         };
         let mut msghdr = unsafe { core::mem::zeroed::<libc::msghdr>() };
         msghdr.msg_iov = &mut iov;
@@ -226,16 +133,14 @@ impl Wayland {
         };
 
         // create registry object with id 2
-        // wl_display (ID 1) -> request opcode 1 (get_registry)
-        let mut reg_msg = Message::new(1, 1);
-        reg_msg.write_u32(2);
-        wayland.send(&reg_msg.finalize(), None);
+        let mut reg_msg = Message::new(DISPLAY_ID, wl_display::request::GET_REGISTRY);
+        reg_msg.write_u32(REGISTRY_ID);
+        wayland.send(&reg_msg, None);
 
         // sync call to make sure registry globals are sent
-        // wl_display (ID 1) -> request opcode 0 (sync)
-        let mut sync_msg = Message::new(1, 0);
-        sync_msg.write_u32(3); // 3 -> callback object ID
-        wayland.send(&sync_msg.finalize(), None);
+        let mut sync_msg = Message::new(DISPLAY_ID, wl_display::request::SYNC);
+        sync_msg.write_u32(SYNC_CALLBACK_ID);
+        wayland.send(&sync_msg, None);
 
         Ok(wayland)
     }

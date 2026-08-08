@@ -1,70 +1,35 @@
+use wllib::fmt_lite::StringOnStack;
+
 use crate::state::State;
 use crate::{AppError, file_err, image_err};
 
-// build strings dynamically on the stack, no heap allocation needed
-struct StringOnStack {
-    buffer: [u8; 96],
-    len: usize,
-}
-impl StringOnStack {
-    fn new() -> Self {
-        StringOnStack {
-            buffer: [0; 96],
-            len: 0,
-        }
-    }
-    // push an integer converted to ASCII representation
-    fn push_usize(&mut self, mut num: usize) {
-        if num == 0 {
-            self.push_str(b"0");
-            return;
-        }
-        let mut tmp = [0u8; 10];
-        let mut idx = 10;
-        while num > 0 {
-            idx -= 1;
-            tmp[idx] = b'0' + (num % 10) as u8;
-            num /= 10;
-        }
-        self.push_str(&tmp[idx..10]);
-    }
-    // push a byte slice/string
-    fn push_str(&mut self, str: &[u8]) {
-        let new_len = self.len + str.len();
-        if new_len < 95 {
-            self.buffer[self.len..new_len].copy_from_slice(str);
-            self.len = new_len;
-        }
-    }
-}
-
 // ffmpeg filter string based on output aspect ratio and fit/fill mode
-fn get_ffmpeg_filter(width: usize, height: usize, fill: bool) -> StringOnStack {
+fn get_ffmpeg_filter(width: u32, height: u32, fill: bool) -> StringOnStack<96> {
     let mut filter = StringOnStack::new();
 
-    filter.push_str(b"scale=");
-    filter.push_usize(width);
-    filter.push_str(b":");
-    filter.push_usize(height);
+    filter.push_str("scale=");
+    filter.push_u32(width);
+    filter.push_str(":");
+    filter.push_u32(height);
 
     match fill {
         true => {
             // scale and center crop to fill the output resolution
-            filter.push_str(b":force_original_aspect_ratio=increase,crop=");
-            filter.push_usize(width);
-            filter.push_str(b":");
-            filter.push_usize(height);
+            filter.push_str(":force_original_aspect_ratio=increase,crop=");
+            filter.push_u32(width);
+            filter.push_str(":");
+            filter.push_u32(height);
         }
         false => {
             // scale and pad with black bars to fit inside the output resolution
-            filter.push_str(b":force_original_aspect_ratio=decrease,pad=");
-            filter.push_usize(width);
-            filter.push_str(b":");
-            filter.push_usize(height);
-            filter.push_str(b":(ow-iw)/2:(oh-ih)/2");
+            filter.push_str(":force_original_aspect_ratio=decrease,pad=");
+            filter.push_u32(width);
+            filter.push_str(":");
+            filter.push_u32(height);
+            filter.push_str(":(ow-iw)/2:(oh-ih)/2");
         }
     }
-    filter.buffer[filter.len] = b'\0'; // null terminate because C
+    filter.null_terminate();
 
     filter
 }
@@ -84,7 +49,7 @@ pub fn load_and_scale(
     let Some(path) = state.config.image_path else {
         return Err(file_err());
     };
-    let filter = get_ffmpeg_filter(out_width as usize, out_height as usize, state.config.fill);
+    let filter = get_ffmpeg_filter(out_width, out_height, state.config.fill);
 
     unsafe {
         let mut pipe = [0i32; 2];
@@ -120,7 +85,7 @@ pub fn load_and_scale(
                 c"-i".as_ptr(),
                 path,
                 c"-vf".as_ptr(),
-                filter.buffer.as_ptr() as _,
+                filter.as_ptr() as _,
                 c"-f".as_ptr(),
                 c"rawvideo".as_ptr(),
                 c"-pix_fmt".as_ptr(),

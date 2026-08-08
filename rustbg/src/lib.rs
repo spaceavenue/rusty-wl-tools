@@ -49,22 +49,22 @@ pub fn image_err() -> AppError {
     return AppError::ImageDecodeError;
 }
 
-pub fn read_u32(buf: &[u8], idx: usize) -> u32 {
-    if idx + 4 <= buf.len() {
-        let mut bytes = [0u8; 4];
-        bytes.copy_from_slice(&buf[idx..idx + 4]);
-        u32::from_ne_bytes(bytes)
-    } else {
-        0
-    }
-}
+// pub fn read_u32(buf: &[u8], idx: usize) -> u32 {
+//     if idx + 4 <= buf.len() {
+//         let mut bytes = [0u8; 4];
+//         bytes.copy_from_slice(&buf[idx..idx + 4]);
+//         u32::from_ne_bytes(bytes)
+//     } else {
+//         0
+//     }
+// }
 
-pub fn read_u16(buf: &[u8], idx: usize) -> u16 {
-    if idx + 2 <= buf.len() {
-        let mut bytes = [0u8; 2];
-        bytes.copy_from_slice(&buf[idx..idx + 2]);
-        u16::from_ne_bytes(bytes)
-    } else {
-        0
-    }
-}
+// pub fn read_u16(buf: &[u8], idx: usize) -> u16 {
+//     if idx + 2 <= buf.len() {
+//         let mut bytes = [0u8; 2];
+//         bytes.copy_from_slice(&buf[idx..idx + 2]);
+//         u16::from_ne_bytes(bytes)
+//     } else {
+//         0
+//     }
+// }

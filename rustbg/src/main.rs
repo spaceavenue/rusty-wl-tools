@@ -2,8 +2,9 @@
 #![no_main]
 
 use rustbg::state::{Config, State};
-use rustbg::wayland::Message;
+// use rustbg::wayland::Message;
 use rustbg::{remove_self, write_err};
+use wllib::wire::Message;
 
 unsafe extern "C" {
     static optarg: *const libc::c_char;
@@ -72,7 +73,7 @@ pub extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_i
         // wl_compositor (ID) -> request opcode 0 (create_surface)
         let mut surf_msg = Message::new(state.wayland.compositor_id, 0);
         surf_msg.write_u32(surf_id);
-        state.wayland.send(&surf_msg.finalize(), None);
+        state.wayland.send(&surf_msg, None);
 
         // 2. wrap the wl_surface as a layer surface
         // zwlr_layer_shell_v1 (ID) -> request opcode 0 (get_layer_surface)
@@ -82,19 +83,19 @@ pub extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_i
         ls_msg.write_u32(output_id);
         ls_msg.write_u32(0); // 0 -> background layer
         ls_msg.write_cstr(state.config.namespace);
-        state.wayland.send(&ls_msg.finalize(), None);
+        state.wayland.send(&ls_msg, None);
 
         // anchor to all edges for full screen
         // zwlr_layer_surface_v1 (ID) -> request opcode 1 (set_anchor)
         let mut anchor_msg = Message::new(layer_surf_id, 1);
         anchor_msg.write_u32(15); // 15 -> achor to: top | bottom | left | right (1 | 2 | 4 | 8 = 15)
-        state.wayland.send(&anchor_msg.finalize(), None);
+        state.wayland.send(&anchor_msg, None);
 
         // configure exclusive zone to go behind other layer surfaces, like panels or status bars
         // zwlr_layer_surface_v1 (ID) -> request opcode 2 (set_exclusive_zone)
         let mut ex_msg = Message::new(layer_surf_id, 2);
         ex_msg.write_i32(-1); // -1 means do not request any exclusive zone.
-        state.wayland.send(&ex_msg.finalize(), None);
+        state.wayland.send(&ex_msg, None);
 
         // initial attach (attaching 0 or NULL tells compositor to map surface)
         // wl_surface (ID) -> request opcode 1 (attach)
@@ -102,13 +103,11 @@ pub extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_i
         attach_msg.write_u32(0); // NULL -> map surface
         attach_msg.write_i32(0);
         attach_msg.write_i32(0);
-        state.wayland.send(&attach_msg.finalize(), None);
+        state.wayland.send(&attach_msg, None);
 
         // commit initial surface
         // wl_surface (ID) -> request opcode 6 (commit)
-        state
-            .wayland
-            .send(&Message::new(surf_id, 6).finalize(), None);
+        state.wayland.send(&Message::new(surf_id, 6), None);
 
         // store the allocated ids back into our Output instance
         if let Some(ref mut out) = state.outputs[i] {
