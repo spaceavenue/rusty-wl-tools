@@ -1,7 +1,8 @@
+use wllib::error::SysError;
 use wllib::fmt_lite::StringOnStack;
 
-use crate::state::State;
-use crate::{AppError, file_err, image_err};
+use crate::AppError;
+use crate::state::Config;
 
 // ffmpeg filter string based on output aspect ratio and fit/fill mode
 fn get_ffmpeg_filter(width: u32, height: u32, fill: bool) -> StringOnStack<96> {
@@ -44,26 +45,27 @@ pub fn load_and_scale(
     out_width: u32,
     out_height: u32,
     buffer: &mut [u8],
-    state: &mut State,
+    config: &Config,
 ) -> Result<(), AppError> {
-    let Some(path) = state.config.image_path else {
-        return Err(file_err());
+    let Some(path) = config.image_path else {
+        return Err(AppError::MissingImagePath);
     };
-    let filter = get_ffmpeg_filter(out_width, out_height, state.config.fill);
+    let filter = get_ffmpeg_filter(out_width, out_height, config.fill);
 
     unsafe {
         let mut pipe = [0i32; 2];
         // create an unidirectional pipe to read data from child process
         // O_CLOEXEC closes the read/write ends in any other spawned children
         if libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC) != 0 {
-            return Err(file_err());
+            return Err(AppError::Sys(SysError::last("pipe2")));
         }
 
         let pid = libc::fork();
         if pid < 0 {
+            let err = SysError::last("fork");
             libc::close(pipe[0]);
             libc::close(pipe[1]);
-            return Err(file_err());
+            return Err(AppError::Sys(err));
         }
         // child process context
         if pid == 0 {
@@ -113,9 +115,10 @@ pub fn load_and_scale(
                 }
                 0 => break, // EOF reached
                 _ => {
+                    let err = SysError::last("read");
                     libc::close(pipe[0]);
                     libc::waitpid(pid, core::ptr::null_mut(), 0);
-                    return Err(image_err());
+                    return Err(AppError::Sys(err));
                 }
             }
         }
@@ -123,7 +126,7 @@ pub fn load_and_scale(
         libc::waitpid(pid, core::ptr::null_mut(), 0);
 
         if offset != buffer.len() {
-            return Err(image_err()); // failed to read complete frame size
+            return Err(AppError::ImageDecodeError); // failed to read complete frame size
         }
     }
     Ok(())

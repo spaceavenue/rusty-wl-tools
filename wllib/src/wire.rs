@@ -104,17 +104,18 @@ impl Message {
     /// Create a new message targeting `obj_id` with request/event `opcode`
     pub fn new(obj_id: u32, opcode: u16) -> Self {
         let header = MessageHeader::new(obj_id, opcode, 8);
-        let msg = Self {
+        let mut msg = Self {
             header,
             data: [0; 256],
-            // len: 8,
         };
-        // msg.data[0..4].copy_from_slice(&obj_id.to_ne_bytes());
-        // msg.data[4..6].copy_from_slice(&opcode.to_ne_bytes());
+        msg.data[0..4].copy_from_slice(&obj_id.to_ne_bytes());
+        msg.data[4..6].copy_from_slice(&opcode.to_ne_bytes());
+        msg.sync_size();
         msg
     }
-    pub fn header(&self) -> MessageHeader {
-        self.header
+
+    fn sync_size(&mut self) {
+        self.data[6..8].copy_from_slice(&self.header.size.to_ne_bytes());
     }
 
     pub fn write_u32(&mut self, val: u32) {
@@ -122,6 +123,7 @@ impl Message {
             self.data[self.header.size as usize..self.header.size as usize + 4]
                 .copy_from_slice(&val.to_ne_bytes());
             self.header.size += 4;
+            self.sync_size();
         }
     }
 
@@ -142,12 +144,13 @@ impl Message {
         } else {
             s.len()
         } as u16;
-        if self.header.size + actual_len + 1 <= self.data.len() as u16 {
+        if self.header.size + actual_len < self.data.len() as u16 {
             self.data[self.header.size as usize..(self.header.size + actual_len) as usize]
                 .copy_from_slice(&s[..actual_len as usize]);
             self.data[(self.header.size + actual_len) as usize] = 0;
-            self.header.size += actual_len as u16 + 1;
+            self.header.size += actual_len + 1;
             self.header.size = (self.header.size + 3) & !3; // pad to 4-byte boundary
+            self.sync_size();
         }
     }
 
@@ -160,7 +163,7 @@ impl Message {
                 len += 1;
             }
             self.write_u32((len + 1) as u32);
-            if self.header.size + len + 1 <= self.data.len() as u16 {
+            if self.header.size + len < self.data.len() as u16 {
                 core::ptr::copy_nonoverlapping(
                     s as *const u8,
                     self.data.as_mut_ptr().add(self.header.size as usize),
@@ -169,17 +172,10 @@ impl Message {
                 self.data[(self.header.size + len) as usize] = 0;
                 self.header.size += len + 1;
                 self.header.size = (self.header.size + 3) & !3;
+                self.sync_size();
             }
         }
     }
-
-    /// Back-patch the total message size into the header and freeze the message for sending.
-    // pub fn finalize(mut self) -> Self {
-    //     let total_size = self.header.size;
-    //     self.header.size = total_size;
-    //     self.data[6..8].copy_from_slice(&total_size.to_ne_bytes());
-    //     self
-    // }
 
     pub fn as_bytes(&self) -> &[u8] {
         &self.data[..self.header.size as usize]

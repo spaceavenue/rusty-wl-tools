@@ -1,4 +1,5 @@
 // build strings dynamically on the stack, no heap allocation needed
+#[derive(Clone, Copy)]
 pub struct StringOnStack<const N: usize> {
     buf: [u8; N],
     len: usize,
