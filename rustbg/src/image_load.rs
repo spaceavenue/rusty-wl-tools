@@ -6,33 +6,33 @@ use crate::state::Config;
 
 // ffmpeg filter string based on output aspect ratio and fit/fill mode
 fn get_ffmpeg_filter(width: u32, height: u32, fill: bool) -> StringOnStack<96> {
-    let mut filter = StringOnStack::new();
+  let mut filter = StringOnStack::new();
 
-    filter.push_str("scale=");
-    filter.push_u32(width);
-    filter.push_str(":");
-    filter.push_u32(height);
+  filter.push_str("scale=");
+  filter.push_u32(width);
+  filter.push_str(":");
+  filter.push_u32(height);
 
-    match fill {
-        true => {
-            // scale and center crop to fill the output resolution
-            filter.push_str(":force_original_aspect_ratio=increase,crop=");
-            filter.push_u32(width);
-            filter.push_str(":");
-            filter.push_u32(height);
-        }
-        false => {
-            // scale and pad with black bars to fit inside the output resolution
-            filter.push_str(":force_original_aspect_ratio=decrease,pad=");
-            filter.push_u32(width);
-            filter.push_str(":");
-            filter.push_u32(height);
-            filter.push_str(":(ow-iw)/2:(oh-ih)/2");
-        }
+  match fill {
+    true => {
+      // scale and center crop to fill the output resolution
+      filter.push_str(":force_original_aspect_ratio=increase,crop=");
+      filter.push_u32(width);
+      filter.push_str(":");
+      filter.push_u32(height);
     }
-    filter.null_terminate();
+    false => {
+      // scale and pad with black bars to fit inside the output resolution
+      filter.push_str(":force_original_aspect_ratio=decrease,pad=");
+      filter.push_u32(width);
+      filter.push_str(":");
+      filter.push_u32(height);
+      filter.push_str(":(ow-iw)/2:(oh-ih)/2");
+    }
+  }
+  filter.null_terminate();
 
-    filter
+  filter
 }
 
 // this was a bit hard to follow so im documenting for my own reference
@@ -42,92 +42,92 @@ fn get_ffmpeg_filter(width: u32, height: u32, fill: bool) -> StringOnStack<96> {
 // 3. connect it's write end (stdout) to the write end of the pipe
 // 4. then read the raw bgra pixels from our read end, directly into the mmap_slice
 pub fn load_and_scale(
-    out_width: u32,
-    out_height: u32,
-    buffer: &mut [u8],
-    config: &Config,
+  out_width: u32,
+  out_height: u32,
+  buffer: &mut [u8],
+  config: &Config,
 ) -> Result<(), AppError> {
-    let Some(path) = config.image_path else {
-        return Err(AppError::MissingImagePath);
-    };
-    let filter = get_ffmpeg_filter(out_width, out_height, config.fill);
+  let Some(path) = config.image_path else {
+    return Err(AppError::MissingImagePath);
+  };
+  let filter = get_ffmpeg_filter(out_width, out_height, config.fill);
 
-    unsafe {
-        let mut pipe = [0i32; 2];
-        // create an unidirectional pipe to read data from child process
-        // O_CLOEXEC closes the read/write ends in any other spawned children
-        if libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC) != 0 {
-            return Err(AppError::Sys(SysError::last("pipe2")));
-        }
-
-        let pid = libc::fork();
-        if pid < 0 {
-            let err = SysError::last("fork");
-            libc::close(pipe[0]);
-            libc::close(pipe[1]);
-            return Err(AppError::Sys(err));
-        }
-        // child process context
-        if pid == 0 {
-            libc::close(pipe[0]);
-            libc::dup2(pipe[1], 1); // redirect stdout to the write-end of the pipe
-            libc::close(pipe[1]);
-            libc::signal(libc::SIGPIPE, libc::SIG_DFL); // eestore default SIGPIPE handler before exec
-
-            // redirect stderr to /dev/null
-            let devnull = libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY);
-            if devnull >= 0 {
-                libc::dup2(devnull, 2);
-                libc::close(devnull);
-            }
-
-            // build ffmpeg argument vector: scale image to raw bgra pixels and stream to stdout
-            let argv: [*const libc::c_char; 11] = [
-                c"ffmpeg".as_ptr(),
-                c"-i".as_ptr(),
-                path,
-                c"-vf".as_ptr(),
-                filter.as_ptr() as _,
-                c"-f".as_ptr(),
-                c"rawvideo".as_ptr(),
-                c"-pix_fmt".as_ptr(),
-                c"bgra".as_ptr(),
-                c"-".as_ptr(),
-                core::ptr::null(),
-            ];
-            libc::execvp(c"ffmpeg".as_ptr(), argv.as_ptr());
-            libc::_exit(1); // if execvp failed, kill child >:)
-        }
-
-        // parent process context
-        libc::close(pipe[1]); // close the write end in parent
-        let mut offset = 0usize;
-        // read raw bytes from the pipe directly into buffer
-        loop {
-            let remaining = buffer.len() - offset;
-            if remaining == 0 {
-                break;
-            }
-            let num_bytes = libc::read(pipe[0], buffer.as_mut_ptr().add(offset) as _, remaining);
-            match num_bytes {
-                num_bytes if num_bytes > 0 => {
-                    offset += num_bytes as usize;
-                }
-                0 => break, // EOF reached
-                _ => {
-                    let err = SysError::last("read");
-                    libc::close(pipe[0]);
-                    libc::waitpid(pid, core::ptr::null_mut(), 0);
-                    return Err(AppError::Sys(err));
-                }
-            }
-        }
-        libc::close(pipe[0]);
-        libc::waitpid(pid, core::ptr::null_mut(), 0);
-
-        if offset != buffer.len() {
-            return Err(AppError::ImageDecodeError); // failed to read complete frame size
-        }
+  unsafe {
+    let mut pipe = [0i32; 2];
+    // create an unidirectional pipe to read data from child process
+    // O_CLOEXEC closes the read/write ends in any other spawned children
+    if libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC) != 0 {
+      return Err(AppError::Sys(SysError::last("pipe2")));
     }
-    Ok(())
+
+    let pid = libc::fork();
+    if pid < 0 {
+      let err = SysError::last("fork");
+      libc::close(pipe[0]);
+      libc::close(pipe[1]);
+      return Err(AppError::Sys(err));
+    }
+    // child process context
+    if pid == 0 {
+      libc::close(pipe[0]);
+      libc::dup2(pipe[1], 1); // redirect stdout to the write-end of the pipe
+      libc::close(pipe[1]);
+      libc::signal(libc::SIGPIPE, libc::SIG_DFL); // eestore default SIGPIPE handler before exec
+
+      // redirect stderr to /dev/null
+      let devnull = libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY);
+      if devnull >= 0 {
+        libc::dup2(devnull, 2);
+        libc::close(devnull);
+      }
+
+      // build ffmpeg argument vector: scale image to raw bgra pixels and stream to stdout
+      let argv: [*const libc::c_char; 11] = [
+        c"ffmpeg".as_ptr(),
+        c"-i".as_ptr(),
+        path,
+        c"-vf".as_ptr(),
+        filter.as_ptr() as _,
+        c"-f".as_ptr(),
+        c"rawvideo".as_ptr(),
+        c"-pix_fmt".as_ptr(),
+        c"bgra".as_ptr(),
+        c"-".as_ptr(),
+        core::ptr::null(),
+      ];
+      libc::execvp(c"ffmpeg".as_ptr(), argv.as_ptr());
+      libc::_exit(1); // if execvp failed, kill child >:)
+    }
+
+    // parent process context
+    libc::close(pipe[1]); // close the write end in parent
+    let mut offset = 0usize;
+    // read raw bytes from the pipe directly into buffer
+    loop {
+      let remaining = buffer.len() - offset;
+      if remaining == 0 {
+        break;
+      }
+      let num_bytes = libc::read(pipe[0], buffer.as_mut_ptr().add(offset) as _, remaining);
+      match num_bytes {
+        num_bytes if num_bytes > 0 => {
+          offset += num_bytes as usize;
+        }
+        0 => break, // EOF reached
+        _ => {
+          let err = SysError::last("read");
+          libc::close(pipe[0]);
+          libc::waitpid(pid, core::ptr::null_mut(), 0);
+          return Err(AppError::Sys(err));
+        }
+      }
+    }
+    libc::close(pipe[0]);
+    libc::waitpid(pid, core::ptr::null_mut(), 0);
+
+    if offset != buffer.len() {
+      return Err(AppError::ImageDecodeError); // failed to read complete frame size
+    }
+  }
+  Ok(())
 }
