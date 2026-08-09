@@ -11,15 +11,12 @@ use crate::gamma;
 pub struct Global {
   // wl_compositor global id
   pub compositor_id: u32,
-  // wl_shm global id
-  pub shm_id: u32,
   // zwlr_layer_shell_v1 global id
   pub gamma_manager_id: u32,
 }
 
 // abstration around wl_output
 pub struct Output {
-  pub global_name: u32,
   pub output_id: u32,
   pub gamma_control_id: u32,
 }
@@ -55,7 +52,7 @@ impl State {
   // gamma ramp expects. We generate ramps for the configured color temperature and hand them
   // over via set_gamma.
   fn handle_gamma_size(&mut self, conn: &mut Connection, opcode: u16, data: &[u8], i: usize) {
-    if opcode != zwlr_gamma_control_v1::event::FAILED {
+    if opcode == zwlr_gamma_control_v1::event::FAILED {
       return;
     }
     let size = read_u32(data, 0) as usize;
@@ -105,7 +102,6 @@ impl GlobalHandler for State {
         match bind(conn, name, interface, clamp_version(4, version), id) {
           Ok(()) => {
             self.outputs[self.output_len] = Some(Output {
-              global_name: name,
               output_id: id,
               gamma_control_id: 0,
             });
