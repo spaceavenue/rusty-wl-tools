@@ -5,8 +5,8 @@
 //! Every constant here was cross-checked against the upstream protocol XML rather than
 //! transcribed from memory:
 //! - core interfaces: <https://github.com/wayland-mirror/wayland> `protocol/wayland.xml`
-//! - wlr-layer-shell / wlr-gamma-control:
-//!   <https://github.com/swaywm/wlr-protocols> `unstable/*.xml`
+//! - wlr-layer-shell / wlr-gamma-control: <https://github.com/swaywm/wlr-protocols>
+//!   `unstable/*.xml`
 //!
 //! Adding support for another interface (e.g. `xdg_shell`, `wl_seat`) means adding one small file
 //! here, cross-checked the same way, rather than hand-writing opcodes at each call site.
