@@ -52,8 +52,8 @@ pub fn get_image_fd(out_width: u32, out_height: u32, config: &Config) -> Result<
       return Err(AppError::Sys(err));
     }
 
-    // get a byte slice from the mmap, spawn dump-bgra, fill the mmap'd region directly, unmap
-    // file
+    // get a byte slice from the mmap, spawn dump-bgra/ffmpeg, fill the mmap'd region directly,
+    // unmap file
     let mmap_slice = slice::from_raw_parts_mut(mmap_ptr as *mut u8, size);
     let result = image_load::load_and_scale(out_width, out_height, mmap_slice, config);
     libc::munmap(mmap_ptr, size);

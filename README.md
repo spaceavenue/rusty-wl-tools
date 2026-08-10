@@ -2,7 +2,7 @@
 This is a small collection of rust-based wayland utilities.
 
 ## rustbg
-Sets the wallpaper using the wlr-layer-shell protocol. Image loading and decoding is handled by [dump-bgra](https://codeberg.org/spaceavenue/dump-bgra) (a tool I created specifically to dump bgra pixels as fast as possible. yknow. for Speed(tm)). You need to have it installed on your system for the wallpaper to work. If you don't want to, you can also use the main branch, which uses ffmpeg instead. The rest is the same.
+Sets the wallpaper using the wlr-layer-shell protocol. Image loading and decoding is handled by [dump-bgra](https://codeberg.org/spaceavenue/dump-bgra) (a tool I created specifically to dump bgra pixels as fast as possible. yknow. for Speed(tm)). You need to have it installed on your system for the wallpaper to work. If you don't want to, you can build with `--feature ffmpeg` to use ffmpeg instead. The rest is the same.
 Use `-f` to fill/center-crop the wallpaper, omit for a "fit" mode where the empty space is padded with black pixels. Supply the layer namespace with `-n <name>`. Mandatory argument: the image path. 
 
 ## rustemp
