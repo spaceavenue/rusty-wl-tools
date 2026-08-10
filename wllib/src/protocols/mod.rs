@@ -11,6 +11,8 @@
 //! Adding support for another interface (e.g. `xdg_shell`, `wl_seat`) means adding one small file
 //! here, cross-checked the same way, rather than hand-writing opcodes at each call site.
 
+pub mod ext_idle_notification_v1;
+pub mod ext_idle_notifier_v1;
 pub mod wl_callback;
 pub mod wl_compositor;
 pub mod wl_display;

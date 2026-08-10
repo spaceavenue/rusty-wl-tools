@@ -156,24 +156,19 @@ impl Message {
 
   /// Write a `string` argument from a raw NUL-terminated C string pointer (e.g. `optarg`, or a
   /// `c"..."` literal).
-  pub fn write_cstr(&mut self, s: *const libc::c_char) {
-    unsafe {
-      let mut len = 0u16;
-      while *s.add(len as usize) != 0 {
-        len += 1;
-      }
-      self.write_u32((len + 1) as u32);
-      if self.header.size + len < self.data.len() as u16 {
-        core::ptr::copy_nonoverlapping(
-          s as *const u8,
-          self.data.as_mut_ptr().add(self.header.size as usize),
-          len as usize,
-        );
-        self.data[(self.header.size + len) as usize] = 0;
-        self.header.size += len + 1;
-        self.header.size = (self.header.size + 3) & !3;
-        self.sync_size();
-      }
+  pub fn write_cstr(&mut self, s: &core::ffi::CStr) {
+    let bytes = s.to_bytes_with_nul();
+    let len = bytes.len() as u16;
+
+    self.write_u32(len as u32);
+
+    if self.header.size + len < self.data.len() as u16 {
+      self.data[self.header.size as usize..(self.header.size + len) as usize]
+        .copy_from_slice(bytes);
+      self.data[(self.header.size + len) as usize] = 0;
+      self.header.size += len;
+      self.header.size = (self.header.size + 3) & !3;
+      self.sync_size();
     }
   }
 

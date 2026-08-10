@@ -4,19 +4,6 @@ use crate::protocols::wl_display::DISPLAY_ID;
 use crate::transport::{Connection, RecvResult};
 use crate::wire::{parse_header, read_string, read_u32};
 
-// /// Result of a [`dispatch_once`] call.
-// pub enum DispatchResult {
-//     /// Events were parsed and handed to the handler.
-//     Ok,
-//     /// The compositor closed the connection.
-//     Closed,
-//     /// The `recv()` syscall itself failed.
-//     Error(WireError),
-//     /// The compositor sent a `wl_display::error` event, meaning the connection is dead and the
-//     /// caller should stop dispatching.
-//     Protocol(WireError),
-// }
-
 /// Implement to receive protocol events once the registry crawl is done.
 ///
 /// `data` is the bytes immediately following the 8-byte header, up to the next message. Use
