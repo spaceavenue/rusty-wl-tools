@@ -1,7 +1,7 @@
 use wllib::error::SysError;
 use wllib::fmt_lite::StringOnStack;
 
-use crate::AppError;
+use crate::error::AppError;
 use crate::state::Config;
 
 // this was a bit hard to follow so im documenting for my own reference

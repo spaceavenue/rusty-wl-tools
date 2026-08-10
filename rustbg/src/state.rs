@@ -18,6 +18,7 @@ pub struct Global {
 }
 
 // abstration around wl_output
+#[derive(Default)]
 pub struct Output {
   pub global_name: u32,
   pub output_id: u32,
@@ -45,7 +46,7 @@ impl Default for Config {
 
 pub struct State {
   pub global: Global,
-  pub outputs: [Option<Output>; 4],
+  pub outputs: [Output; 4],
   pub output_len: usize,
   pub config: Config,
 }
@@ -53,20 +54,21 @@ impl State {
   pub fn init(config: Config) -> Self {
     Self {
       global: Global::default(),
-      outputs: core::array::from_fn(|_| None),
+      outputs: core::array::from_fn(|_| Output::default()),
       output_len: 0,
       config,
     }
   }
 
   // zwlr_layer_surface_v1::configure(serial, width, height): the compositor telling us the
-  // size to render at. We ack it, render the wallpaper at that size, and attach/commit it.
-  fn handle_layer_surface_configure(
-    &mut self,
+  // size to render at. we ack it, render the wallpaper at that size, and attach/commit it.
+  fn handle_layer_surface(
     conn: &mut Connection,
+    out: &mut Output,
+    config: &Config,
+    shm_id: u32,
     opcode: u16,
     data: &[u8],
-    i: usize,
   ) {
     // event matches a bound layer surface object
     if opcode != zwlr_layer_surface_v1::event::CONFIGURE {
@@ -77,7 +79,7 @@ impl State {
     let height = read_u32(data, 8);
 
     // acknowledge the layer surface configuration
-    let layer_surface_id = self.outputs[i].as_ref().unwrap().layer_surface_id;
+    let layer_surface_id = out.layer_surface_id;
     let mut ack = Message::new(
       layer_surface_id,
       zwlr_layer_surface_v1::request::ACK_CONFIGURE,
@@ -90,7 +92,7 @@ impl State {
     }
 
     // get the fd containing the scaled image data
-    let fd = match shm::get_image_fd(width, height, &self.config) {
+    let fd = match shm::get_image_fd(width, height, config) {
       Ok(fd) => fd,
       Err(e) => {
         e.write_diagnostic();
@@ -103,7 +105,7 @@ impl State {
     let stride = (width * 4) as i32;
 
     // create a shared memory pool
-    let mut pool_msg = Message::new(self.global.shm_id, wl_shm::request::CREATE_POOL);
+    let mut pool_msg = Message::new(shm_id, wl_shm::request::CREATE_POOL);
     pool_msg.write_u32(pool_id);
     pool_msg.write_i32((width * height * 4) as i32);
     conn.send_logged(&pool_msg, Some(fd));
@@ -122,9 +124,6 @@ impl State {
     // destroy the pool object, buffer remains valid tho
     conn.send_logged(&Message::new(pool_id, wl_shm_pool::request::DESTROY), None);
 
-    let Some(ref mut out) = self.outputs[i] else {
-      return;
-    };
     out.buffer_id = buffer_id;
     let wl_surface_id = out.wl_surface_id;
 
@@ -183,13 +182,11 @@ impl GlobalHandler for State {
         let id = conn.alloc_id();
         match bind(conn, name, interface, clamp_version(4, version), id) {
           Ok(()) => {
-            self.outputs[self.output_len] = Some(Output {
+            self.outputs[self.output_len] = Output {
               global_name: name,
               output_id: id,
-              wl_surface_id: 0,
-              layer_surface_id: 0,
-              buffer_id: 0,
-            });
+              ..Default::default()
+            };
             self.output_len += 1;
           }
           Err(e) => e.write_diagnostic(),
@@ -201,25 +198,11 @@ impl GlobalHandler for State {
 }
 impl EventHandler for State {
   fn handle_event(&mut self, conn: &mut Connection, sender: u32, opcode: u16, data: &[u8]) {
-    let mut out_idx = None;
-    for i in 0..self.output_len {
-      if let Some(ref o) = self.outputs[i] {
-        if o.layer_surface_id == sender {
-          out_idx = Some(i);
-          break;
-        }
-      }
-    }
-    let Some(i) = out_idx else { return };
-    {
-      let this = &mut *self;
-      let Some(ref out) = this.outputs[i] else {
+    self.outputs.iter_mut().for_each(|out| {
+      if out.layer_surface_id != sender {
         return;
-      };
-      let is_layer_surface = out.layer_surface_id == sender;
-      if is_layer_surface {
-        this.handle_layer_surface_configure(conn, opcode, data, i);
       }
-    };
+      State::handle_layer_surface(conn, out, &self.config, self.global.shm_id, opcode, data);
+    });
   }
 }

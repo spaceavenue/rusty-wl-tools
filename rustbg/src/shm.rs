@@ -2,8 +2,9 @@ use core::slice;
 
 use wllib::error::SysError;
 
+use crate::error::AppError;
+use crate::image_load;
 use crate::state::Config;
-use crate::{AppError, image_load};
 
 // create a memory-backed file, aka memfd, containing the scaled bgra pixel data and return its file
 // descriptor to the compositor. the memfd is mmap'ed to our virtual address space, and we pass it

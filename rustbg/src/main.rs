@@ -1,8 +1,12 @@
 #![no_std]
 #![no_main]
 
-use rustbg::remove_self;
-use rustbg::state::{Config, State};
+pub mod error;
+pub mod image_load;
+pub mod remove_self;
+pub mod shm;
+pub mod state;
+
 use wllib::dispatch::dispatch_once;
 use wllib::error::WireError::ConnectionClosed;
 use wllib::fmt_lite::write_stderr;
@@ -10,6 +14,8 @@ use wllib::protocols::{wl_compositor, wl_surface, zwlr_layer_shell_v1, zwlr_laye
 use wllib::registry::crawl;
 use wllib::transport::Connection;
 use wllib::wire::Message;
+
+use crate::state::{Config, State};
 
 unsafe extern "C" {
   static optarg: *const libc::c_char;
@@ -19,7 +25,7 @@ unsafe extern "C" {
 unsafe extern "C" {}
 
 #[unsafe(no_mangle)]
-pub extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_int {
+pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_int {
   let mut config = Config::default();
   loop {
     let c = unsafe { libc::getopt(argc as i32, argv, c"fn:t:".as_ptr()) };
@@ -63,19 +69,12 @@ pub extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_i
   }
 
   // setup layer surfaces and gamma control for all monitors.
-  for i in 0..4 {
-    if state.outputs[i].is_none() {
-      continue;
-    }
-
+  for i in 0..state.output_len {
     // alloc ids for the new wl_surface (from compositor), layer surface, and gamma control
     // objects.
     let surf_id = conn.alloc_id();
     let layer_surf_id = conn.alloc_id();
-    let output_id = match state.outputs[i] {
-      Some(ref o) => o.output_id,
-      None => continue,
-    };
+    let output_id = state.outputs[i].output_id;
 
     // this is a multi step process
     //
@@ -96,7 +95,7 @@ pub extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_i
     ls_msg.write_u32(surf_id);
     ls_msg.write_u32(output_id);
     ls_msg.write_u32(zwlr_layer_shell_v1::layer::BACKGROUND);
-    ls_msg.write_cstr(state.config.namespace);
+    ls_msg.write_cstr(unsafe { core::ffi::CStr::from_ptr(state.config.namespace) });
     conn.send_logged(&ls_msg, None);
 
     // anchor to all edges for full screen
@@ -124,11 +123,10 @@ pub extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_i
     conn.send_logged(&Message::new(surf_id, wl_surface::request::COMMIT), None);
 
     // store the allocated ids back into our Output instance
-    if let Some(ref mut out) = state.outputs[i] {
-      out.wl_surface_id = surf_id;
-      out.layer_surface_id = layer_surf_id;
-    }
+    state.outputs[i].wl_surface_id = surf_id;
+    state.outputs[i].layer_surface_id = layer_surf_id;
   }
+
   // NULL -> map surface
   // probably doesnt even do anything atp
   // (not like it did before either, madvise is just a "strong suggestion")
