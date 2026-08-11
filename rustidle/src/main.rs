@@ -7,7 +7,7 @@ pub mod state;
 
 use wllib::dispatch::dispatch_once;
 use wllib::error::WireError::ConnectionClosed;
-use wllib::fmt_lite::write_stderr;
+use wllib::fmt_lite::{write_stderr, write_stdout};
 use wllib::protocols::ext_idle_notifier_v1;
 use wllib::registry::crawl;
 use wllib::transport::Connection;
@@ -18,6 +18,14 @@ use crate::state::State;
 
 #[link(name = "c", kind = "static")]
 unsafe extern "C" {}
+
+// Global flag to track the suspended state
+static IS_SUSPENDED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+extern "C" fn handle_sigusr1(_sig: libc::c_int) {
+  // fetch_xor with true inverts the current boolean value
+  IS_SUSPENDED.fetch_xor(true, core::sync::atomic::Ordering::Relaxed);
+}
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_int {
@@ -33,7 +41,10 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
     unsafe { libc::exit(1) };
   }
 
+  // tells kernel to reap child processes automatically, avoiding watipid
   unsafe { libc::signal(libc::SIGCHLD, libc::SIG_IGN) };
+  // handle SIGUSR1
+  unsafe { libc::signal(libc::SIGUSR1, handle_sigusr1 as libc::sighandler_t) };
 
   let mut conn = match Connection::connect() {
     Ok(c) => c,
@@ -72,6 +83,9 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
 
   // main wayland event dispatch loop
   loop {
+    while IS_SUSPENDED.load(core::sync::atomic::Ordering::Relaxed) {
+      unsafe { libc::pause() };
+    }
     match dispatch_once(&mut conn, &mut state) {
       Ok(_) => (),
       Err(ConnectionClosed) => break,
