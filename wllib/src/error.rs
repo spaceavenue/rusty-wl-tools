@@ -66,7 +66,7 @@ impl WireError {
   pub fn write_diagnostic(&self) {
     match self {
       WireError::Sys(e) => {
-        write_stderr(b"[wlcore] syscall failed: ");
+        write_stderr(b"[wllib] syscall failed: ");
         write_stderr(e.call.as_bytes());
         write_stderr(b" (errno ");
         let mut s = StringOnStack::<16>::new();
@@ -75,7 +75,7 @@ impl WireError {
         write_stderr(b")\n");
       }
       WireError::Protocol(p) => {
-        write_stderr(b"[wlcore] wayland protocol error: object ");
+        write_stderr(b"[wllib] wayland protocol error: object ");
         let mut obj = StringOnStack::<16>::new();
         obj.push_u32(p.object_id);
         write_stderr(obj.as_bytes());
@@ -88,10 +88,10 @@ impl WireError {
         write_stderr(b"\n");
       }
       WireError::Environment => {
-        write_stderr(b"[wlcore] WAYLAND_DISPLAY or XDG_RUNTIME_DIR not set\n");
+        write_stderr(b"[wllib] WAYLAND_DISPLAY or XDG_RUNTIME_DIR not set\n");
       }
       WireError::ConnectionClosed => {
-        write_stderr(b"[wlcore] connection closed by compositor\n");
+        write_stderr(b"[wllib] connection closed by compositor\n");
       }
     }
   }

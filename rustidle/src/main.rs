@@ -7,7 +7,7 @@ pub mod state;
 
 use wllib::dispatch::dispatch_once;
 use wllib::error::WireError::ConnectionClosed;
-use wllib::fmt_lite::{write_stderr, write_stdout};
+use wllib::fmt_lite::write_stderr;
 use wllib::protocols::ext_idle_notifier_v1;
 use wllib::registry::crawl;
 use wllib::transport::Connection;
@@ -19,7 +19,7 @@ use crate::state::State;
 #[link(name = "c", kind = "static")]
 unsafe extern "C" {}
 
-// Global flag to track the suspended state
+// flag to track the suspended state
 static IS_SUSPENDED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 extern "C" fn handle_sigusr1(_sig: libc::c_int) {
@@ -44,7 +44,14 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
   // tells kernel to reap child processes automatically, avoiding watipid
   unsafe { libc::signal(libc::SIGCHLD, libc::SIG_IGN) };
   // handle SIGUSR1
-  unsafe { libc::signal(libc::SIGUSR1, handle_sigusr1 as libc::sighandler_t) };
+  unsafe {
+    let mut sa: libc::sigaction = core::mem::zeroed();
+    sa.sa_sigaction = handle_sigusr1 as libc::sighandler_t;
+    // sa_flags = 0 so that blocking syscalls (recv, etc.) fail with EINTR instead of restarting
+    sa.sa_flags = 0;
+    libc::sigemptyset(&mut sa.sa_mask);
+    libc::sigaction(libc::SIGUSR1, &sa, core::ptr::null_mut());
+  }
 
   let mut conn = match Connection::connect() {
     Ok(c) => c,
@@ -67,29 +74,52 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
     unsafe { libc::exit(1) };
   }
 
-  for i in 0..state.config.entry_len {
-    let notif = &mut state.notifications[i];
-    notif.id = conn.alloc_id();
-    let mut msg = Message::new(
-      state.global.idle_notifier_id,
-      ext_idle_notifier_v1::request::GET_IDLE_NOTIFICATION,
-    );
-    msg.write_u32(notif.id);
-    msg.write_u32(notif.entry.timeout_ms);
-    msg.write_u32(state.global.seat_id);
+  let create_notifs = |conn: &mut Connection, state: &mut State| {
+    for i in 0..state.config.entry_len {
+      let notif = &mut state.notifications[i];
+      notif.id = conn.alloc_id();
+      let mut msg = Message::new(
+        state.global.idle_notifier_id,
+        ext_idle_notifier_v1::request::GET_IDLE_NOTIFICATION,
+      );
+      msg.write_u32(notif.id);
+      msg.write_u32(notif.entry.timeout_ms);
+      msg.write_u32(state.global.seat_id);
 
-    conn.send_logged(&msg, None);
-  }
+      conn.send_logged(&msg, None);
+    }
+  };
+
+  create_notifs(&mut conn, &mut state);
+  let mut was_suspended = false;
 
   // main wayland event dispatch loop
   loop {
+    if IS_SUSPENDED.load(core::sync::atomic::Ordering::Relaxed) {
+      for i in 0..state.config.entry_len {
+        let notif = &mut state.notifications[i];
+        let msg = Message::new(notif.id, ext_idle_notifier_v1::request::DESTROY);
+        conn.send_logged(&msg, None);
+      }
+      was_suspended = true;
+    }
+
     while IS_SUSPENDED.load(core::sync::atomic::Ordering::Relaxed) {
       unsafe { libc::pause() };
     }
+
+    if was_suspended {
+      create_notifs(&mut conn, &mut state);
+      was_suspended = false;
+    }
+
     match dispatch_once(&mut conn, &mut state) {
       Ok(_) => (),
       Err(ConnectionClosed) => break,
       Err(e) => {
+        if IS_SUSPENDED.load(core::sync::atomic::Ordering::Relaxed) {
+          continue;
+        }
         e.write_diagnostic();
         break;
       }
