@@ -40,6 +40,7 @@ pub fn clamp_version(wanted: u32, advertised: u32) -> u32 {
   }
 }
 
+/// Crawl the registry for glibals and pass them to the handler.
 pub fn crawl<H: GlobalHandler>(conn: &mut Connection, handler: &mut H) -> Result<(), WireError> {
   // create registry object with id 2
   let mut reg_msg = Message::new(DISPLAY_ID, wl_display::request::GET_REGISTRY);

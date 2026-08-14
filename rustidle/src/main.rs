@@ -33,8 +33,6 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
     write_stderr(b"Usage: rustidle <config-file>\n");
     unsafe { libc::exit(1) };
   }
-  // idk why clippy says its not marked unsafe when it i
-  // #[allow(clippy::not_unsafe_ptr_arg_deref)]
   let config_path = unsafe { *argv.add(1) };
   if config_path.is_null() {
     write_stderr(b"Usage: rustidle <config-file>\n");
