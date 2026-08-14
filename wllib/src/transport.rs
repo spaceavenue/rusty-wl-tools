@@ -5,16 +5,6 @@ use core::mem;
 use crate::error::{SysError, WireError};
 use crate::wire::Message;
 
-/// Result of a `recv()` call on the wayland socket.
-pub enum RecvResult<'a> {
-  /// Data was read into the buffer.
-  Data(&'a [u8]),
-  /// The compositor closed the connection.
-  Closed,
-  /// The underlying `recv(2)` call failed.
-  Error(SysError),
-}
-
 pub struct Connection {
   socket_fd: libc::c_int,
   next_id: u32,
@@ -101,8 +91,7 @@ impl Connection {
       // configure ancillary control buffer to pass the fd
       let mut cmsg_buf = [0u8; 24];
       msghdr.msg_control = cmsg_buf.as_mut_ptr() as *mut libc::c_void;
-      msghdr.msg_controllen =
-        unsafe { libc::CMSG_SPACE(mem::size_of::<libc::c_int>() as u32) as u32 };
+      msghdr.msg_controllen = unsafe { libc::CMSG_SPACE(mem::size_of::<libc::c_int>() as _) };
 
       let cmsg = unsafe { &mut *(libc::CMSG_FIRSTHDR(&msghdr)) };
       cmsg.cmsg_level = libc::SOL_SOCKET;
@@ -123,8 +112,7 @@ impl Connection {
   }
 
   /// Convenience wrapper around [`Self::send`] that logs failures via
-  /// [`WireError::write_diagnostic`] instead of requiring every call site to handle socket errors
-  /// individually.
+  /// [`WireError::write_diagnostic`].
   pub fn send_logged(&self, msg: &Message, fd: Option<libc::c_int>) {
     if let Err(e) = self.send(msg, fd) {
       e.write_diagnostic();
@@ -132,7 +120,7 @@ impl Connection {
   }
 
   /// Read protocol data into `buf` and return what was received.
-  pub fn recv<'a>(&self, buf: &'a mut [u8]) -> RecvResult<'a> {
+  pub fn recv<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8], WireError> {
     let bytes = unsafe {
       libc::recv(
         self.socket_fd,
@@ -142,12 +130,52 @@ impl Connection {
       )
     };
     if bytes > 0 {
-      RecvResult::Data(&buf[..bytes as usize])
+      Ok(&buf[..bytes as usize])
     } else if bytes == 0 {
-      RecvResult::Closed
+      Err(WireError::ConnectionClosed)
     } else {
-      RecvResult::Error(SysError::last("recv"))
+      Err(WireError::Sys(SysError::last("recv")))
     }
+  }
+
+  /// Read protocol data into `buf` and return what was received, along with the first fd if one was
+  /// received.
+  pub fn recv_with_fd<'a>(
+    &self,
+    buf: &'a mut [u8],
+  ) -> (Result<&'a [u8], WireError>, Option<libc::c_int>) {
+    let mut iov = libc::iovec {
+      iov_base: buf.as_ptr() as *mut libc::c_void,
+      iov_len: buf.len(),
+    };
+
+    // configure ancillary control buffer to receive the fd
+    let mut cmsg_buf = [0u8; 24];
+    let mut msghdr = unsafe { mem::zeroed::<libc::msghdr>() };
+    msghdr.msg_iov = &mut iov;
+    msghdr.msg_iovlen = 1 as _;
+    msghdr.msg_control = cmsg_buf.as_mut_ptr() as *mut libc::c_void;
+    msghdr.msg_controllen = unsafe { libc::CMSG_SPACE(mem::size_of::<libc::c_int>() as _) };
+
+    let bytes = unsafe { libc::recvmsg(self.socket_fd, &mut msghdr, 0) };
+    let mut received_fd = None;
+
+    let res = if bytes > 0 {
+      let cmsg = unsafe { libc::CMSG_FIRSTHDR(&msghdr) };
+      if !cmsg.is_null() {
+        let cmsg_ref = unsafe { &*cmsg };
+        if cmsg_ref.cmsg_level == libc::SOL_SOCKET && cmsg_ref.cmsg_type == libc::SCM_RIGHTS {
+          let fd_ptr = unsafe { libc::CMSG_DATA(cmsg) } as *const libc::c_int;
+          received_fd = Some(unsafe { core::ptr::read_unaligned(fd_ptr) });
+        }
+      }
+      Ok(&buf[..bytes as usize])
+    } else if bytes == 0 {
+      Err(WireError::ConnectionClosed)
+    } else {
+      Err(WireError::Sys(SysError::last("recv")))
+    };
+    (res, received_fd)
   }
 }
 

@@ -3,7 +3,7 @@ use crate::fmt_lite::{StringOnStack, write_stdout};
 use crate::protocols::wl_callback::SYNC_CALLBACK_ID;
 use crate::protocols::wl_display::{self, DISPLAY_ID};
 use crate::protocols::wl_registry::{self, REGISTRY_ID};
-use crate::transport::{Connection, RecvResult};
+use crate::transport::Connection;
 use crate::wire::{Message, parse_header, read_string, read_u32};
 
 /// Implement to receive each advertised global during [`crawl`]. For e.g., match on `interface` and
@@ -40,7 +40,6 @@ pub fn clamp_version(wanted: u32, advertised: u32) -> u32 {
   }
 }
 
-/// Crawl the registry for glibals and pass them to the handler.
 pub fn crawl<H: GlobalHandler>(conn: &mut Connection, handler: &mut H) -> Result<(), WireError> {
   // create registry object with id 2
   let mut reg_msg = Message::new(DISPLAY_ID, wl_display::request::GET_REGISTRY);
@@ -55,9 +54,8 @@ pub fn crawl<H: GlobalHandler>(conn: &mut Connection, handler: &mut H) -> Result
   loop {
     let mut buf = [0u8; 4096];
     let data = match conn.recv(&mut buf) {
-      RecvResult::Data(items) => items,
-      RecvResult::Closed => return Err(WireError::ConnectionClosed),
-      RecvResult::Error(sys_error) => return Err(WireError::Sys(sys_error)),
+      Ok(items) => items,
+      Err(e) => return Err(e),
     };
 
     let mut idx = 0;
