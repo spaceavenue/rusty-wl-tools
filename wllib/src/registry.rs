@@ -53,10 +53,7 @@ pub fn crawl<H: GlobalHandler>(conn: &mut Connection, handler: &mut H) -> Result
 
   loop {
     let mut buf = [0u8; 4096];
-    let data = match conn.recv(&mut buf) {
-      Ok(items) => items,
-      Err(e) => return Err(e),
-    };
+    let data = conn.recv(&mut buf)?;
 
     let mut idx = 0;
     // iterate over all protocol messages received in this packet.

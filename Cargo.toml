@@ -4,6 +4,9 @@ cargo-features = ["panic-immediate-abort"]
 resolver = "2"
 members = ["wllib", "rustbg", "rustemp", "rustidle"]
 
+[profile.dev]
+panic = "immediate-abort"
+
 [profile.release]
 opt-level = "z"
 lto = "fat"

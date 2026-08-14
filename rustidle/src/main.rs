@@ -44,7 +44,7 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
   // handle SIGUSR1
   unsafe {
     let mut sa: libc::sigaction = core::mem::zeroed();
-    sa.sa_sigaction = handle_sigusr1 as libc::sighandler_t;
+    sa.sa_sigaction = handle_sigusr1 as *const () as libc::sighandler_t;
     // sa_flags = 0 so that blocking syscalls (recv, etc.) fail with EINTR instead of restarting
     sa.sa_flags = 0;
     libc::sigemptyset(&mut sa.sa_mask);

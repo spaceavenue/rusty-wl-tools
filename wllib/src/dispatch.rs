@@ -18,10 +18,7 @@ pub fn dispatch_once<H: EventHandler>(
   handler: &mut H,
 ) -> Result<(), WireError> {
   let mut buf = [0u8; 4096];
-  let data = match conn.recv(&mut buf) {
-    Ok(items) => items,
-    Err(e) => return Err(e),
-  };
+  let data = conn.recv(&mut buf)?;
   let mut idx = 0;
   while let Some(header) = parse_header(data, idx) {
     if header.sender == DISPLAY_ID && header.opcode == crate::protocols::wl_display::event::ERROR {
