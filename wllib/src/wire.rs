@@ -165,7 +165,6 @@ impl Message {
     if self.header.size + len < self.data.len() as u16 {
       self.data[self.header.size as usize..(self.header.size + len) as usize]
         .copy_from_slice(bytes);
-      self.data[(self.header.size + len) as usize] = 0;
       self.header.size += len;
       self.header.size = (self.header.size + 3) & !3;
       self.sync_size();
