@@ -7,6 +7,7 @@ pub mod remove_self;
 pub mod shm;
 pub mod state;
 
+use wllib::cli;
 use wllib::dispatch::dispatch_once;
 use wllib::error::WireError::ConnectionClosed;
 use wllib::fmt_lite::write_stderr;
@@ -24,39 +25,26 @@ unsafe extern "C" {
 #[link(name = "c", kind = "static")]
 unsafe extern "C" {}
 
+const LONGOPTS: [cli::LongOption; 3] = [
+  cli::LongOption::new("fill", cli::NO_ARGUMENT, 'f'),
+  cli::LongOption::new("namespace", cli::REQUIRED_ARGUMENT, 'n'),
+  cli::LONG_OPTION_TERMINATOR,
+];
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_int {
   let mut config = Config::default();
   let optstring = c"fn:".as_ptr();
-  let longopts = [
-    libc::option {
-      name: c"fill".as_ptr(),
-      has_arg: 0,
-      flag: core::ptr::null_mut(),
-      val: 'f' as _,
-    },
-    libc::option {
-      name: c"namespace".as_ptr(),
-      has_arg: 1,
-      flag: core::ptr::null_mut(),
-      val: 'n' as _,
-    },
-    libc::option {
-      name: core::ptr::null(),
-      has_arg: 0,
-      flag: core::ptr::null_mut(),
-      val: 0,
-    },
-  ];
+
   let mut longindex: libc::c_int = 0;
   unsafe { optind = 1 };
   loop {
     let c = unsafe {
-      libc::getopt_long(
+      cli::getopt_long(
         argc as _,
         argv,
         optstring,
-        longopts.as_ptr(),
+        LONGOPTS.as_ptr(),
         &mut longindex,
       )
     };

@@ -1,5 +1,6 @@
 #![no_std]
 
+pub mod cli;
 pub mod dispatch;
 pub mod error;
 pub mod fmt_lite;
