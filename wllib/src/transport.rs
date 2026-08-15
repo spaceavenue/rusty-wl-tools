@@ -145,7 +145,7 @@ impl Connection {
     buf: &'a mut [u8],
   ) -> (Result<&'a [u8], WireError>, Option<libc::c_int>) {
     let mut iov = libc::iovec {
-      iov_base: buf.as_ptr() as *mut libc::c_void,
+      iov_base: buf.as_mut_ptr() as *mut libc::c_void,
       iov_len: buf.len(),
     };
 

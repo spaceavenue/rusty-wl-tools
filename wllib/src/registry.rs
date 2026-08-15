@@ -1,5 +1,4 @@
 use crate::error::{ProtocolError, WireError};
-use crate::fmt_lite::{StringOnStack, write_stdout};
 use crate::protocols::wl_callback::SYNC_CALLBACK_ID;
 use crate::protocols::wl_display::{self, DISPLAY_ID};
 use crate::protocols::wl_registry::{self, REGISTRY_ID};
@@ -67,9 +66,6 @@ pub fn crawl<H: GlobalHandler>(conn: &mut Connection, handler: &mut H) -> Result
       } else if header.sender == DISPLAY_ID
         && header.opcode == crate::protocols::wl_display::event::ERROR
       {
-        let mut s = StringOnStack::<10>::new();
-        s.push_u32(header.size as u32);
-        write_stdout(s.as_bytes());
         return Err(WireError::Protocol(ProtocolError::from(data, idx)));
       } else if header.sender == SYNC_CALLBACK_ID {
         return Ok(());

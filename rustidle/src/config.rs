@@ -133,7 +133,7 @@ impl Config {
         i += 1;
       }
       // not enough tokens for "<keyword> <ms>"
-      if tok_count < 2 {
+      if tok_count < 3 {
         continue;
       }
 
