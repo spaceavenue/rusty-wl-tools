@@ -41,18 +41,18 @@ pub fn read_u16(buf: &[u8], idx: usize) -> u16 {
 ///
 /// Returns `(content, consumed)` where `content` excludes the NUL terminator and `consumed` is
 /// the total number of bytes occupied by this argument (length prefix + padded string), so the
-/// caller can find the next argument at `idx + consumed`. Returns `None` if the buffer doesn't
-/// hold the full string.
-pub fn read_string(buf: &[u8], idx: usize) -> Option<(&[u8], usize)> {
+/// caller can find the next argument at `idx + consumed`. Returns `None` if the string lenfth is 0
+/// or buffer doesn't hold the full string.
+pub fn read_str(buf: &[u8], idx: usize) -> Option<(&str, usize)> {
   let str_len = read_u32(buf, idx) as usize; // includes NUL terminator
   if str_len == 0 {
-    return Some((&buf[0..0], 4));
+    return None;
   }
   let start = idx + 4;
   if start + str_len > buf.len() {
     return None;
   }
-  let content = &buf[start..start + str_len - 1]; // exclude NUL
+  let content = core::str::from_utf8(&buf[start..start + str_len - 1]).ok()?;
   let padded = (str_len + 3) & !3;
   Some((content, 4 + padded))
 }
@@ -131,24 +131,18 @@ impl Message {
     self.write_u32(val as u32);
   }
 
-  /// Write a `string` argument from a byte slice. Accepts either a NUL-terminated or bare byte
-  /// slice.
-  pub fn write_string(&mut self, s: &[u8]) {
-    let mut s_len = s.len() as u32;
-    if s.last() != Some(&0) {
-      s_len += 1;
-    }
+  /// Write a `string` argument from a `&str`.
+  pub fn write_str(&mut self, s: &str) {
+    let s_len = (s.len() + 1) as u32;
+
     self.write_u32(s_len);
-    let actual_len = if s.last() == Some(&0) {
-      s.len() - 1
-    } else {
-      s.len()
-    } as u16;
-    if self.header.size + actual_len < self.data.len() as u16 {
-      self.data[self.header.size as usize..(self.header.size + actual_len) as usize]
-        .copy_from_slice(&s[..actual_len as usize]);
-      self.data[(self.header.size + actual_len) as usize] = 0;
-      self.header.size += actual_len + 1;
+
+    let actual_len = s.len();
+    let start = self.header.size as usize;
+    if self.header.size + (actual_len as u16) < self.data.len() as u16 {
+      self.data[start..start + actual_len].copy_from_slice(&s.as_bytes());
+      self.data[start + actual_len] = 0;
+      self.header.size += actual_len as u16 + 1;
       self.header.size = (self.header.size + 3) & !3; // pad to 4-byte boundary
       self.sync_size();
     }

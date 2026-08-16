@@ -1,7 +1,7 @@
 //! Error types for the transport/protocol layer.
 
 use crate::fmt_lite::{StringOnStack, write_stderr};
-use crate::wire::{read_string, read_u32};
+use crate::wire::{read_str, read_u32};
 
 /// A failed libc call, captured with `errno` at the point of failure.
 ///
@@ -37,8 +37,8 @@ impl ProtocolError {
     let object_id = read_u32(buf, idx + 8);
     let code = read_u32(buf, idx + 12);
     let mut message: StringOnStack<PROTOCOL_MESSAGE_CAP> = StringOnStack::new();
-    if let Some((text, _)) = read_string(buf, idx + 16) {
-      message.push_bytes(text);
+    if let Some((text, _)) = read_str(buf, idx + 16) {
+      message.push_str(text);
     }
     Self {
       object_id,
@@ -79,10 +79,10 @@ impl WireError {
         let mut s = StringOnStack::<PROTOCOL_MESSAGE_CAP>::new();
         s.push_str("[wllib] wayland protocol error: object ")
           .push_u32(p.object_id)
-          .push_str(", code")
+          .push_str(", code ")
           .push_u32(p.code)
           .push_str(", message: ")
-          .push_bytes(p.message.as_bytes());
+          .push_str(p.message.as_str());
         write_stderr(s.as_bytes());
         write_stderr(b"\n");
       }

@@ -152,30 +152,30 @@ impl State {
 impl GlobalHandler for State {
   // bind globals matching interfaces we want. we bind to the minimum of the client's wanted
   // version and the server's advertised version
-  fn on_global(&mut self, conn: &mut Connection, name: u32, interface: &[u8], version: u32) {
+  fn on_global(&mut self, conn: &mut Connection, name: u32, interface: &str, version: u32) {
     match interface {
-      b"wl_compositor" => {
+      "wl_compositor" => {
         let id = conn.alloc_id();
         match bind(conn, name, interface, clamp_version(7, version), id) {
           Ok(()) => self.global.compositor_id = id,
           Err(e) => e.write_diagnostic(),
         }
       }
-      b"wl_shm" => {
+      "wl_shm" => {
         let id = conn.alloc_id();
         match bind(conn, name, interface, clamp_version(2, version), id) {
           Ok(()) => self.global.shm_id = id,
           Err(e) => e.write_diagnostic(),
         }
       }
-      b"zwlr_layer_shell_v1" => {
+      "zwlr_layer_shell_v1" => {
         let id = conn.alloc_id();
         match bind(conn, name, interface, clamp_version(5, version), id) {
           Ok(()) => self.global.layer_shell_id = id,
           Err(e) => e.write_diagnostic(),
         }
       }
-      b"wl_output" => {
+      "wl_output" => {
         if self.output_len >= 4 {
           return;
         }

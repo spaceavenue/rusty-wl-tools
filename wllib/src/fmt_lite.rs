@@ -9,120 +9,133 @@ pub struct StringOnStack<const N: usize> {
   len: usize,
 }
 impl<const N: usize> StringOnStack<N> {
-  pub fn new() -> Self {
-    StringOnStack {
+  /// Create an empty string.
+  pub const fn new() -> Self {
+    Self {
       buf: [0; N],
       len: 0,
     }
   }
 
   /// Returns the stored string as bytes.
+  pub const fn capacity(&self) -> usize {
+    N.saturating_sub(1)
+  }
+
+  /// Returns remaining capacity in bytes.
+  pub const fn remaining_capacity(&self) -> usize {
+    self.capacity().saturating_sub(self.len)
+  }
+
+  /// Current length in bytes.
+  pub const fn len(&self) -> usize {
+    self.len
+  }
+
+  /// Returns true if empty.
+  pub const fn is_empty(&self) -> bool {
+    self.len == 0
+  }
+
+  /// Clear the string.
+  pub fn clear(&mut self) {
+    self.len = 0;
+    self.buf[0] = 0;
+  }
+
+  /// View as byte slice.
   pub fn as_bytes(&self) -> &[u8] {
     &self.buf[..self.len]
   }
 
-  /// Returns the string as a string slice.
+  /// View as a string slice.
   pub fn as_str(&self) -> &str {
-    core::str::from_utf8(self.as_bytes()).unwrap_or_default()
+    // SAFETY: All push methods enforce UTF-8 validity.
+    unsafe { str::from_utf8_unchecked(&self.buf[..self.len]) }
   }
 
-  /// Returns the string as a c_str. Returns an empty c_str if not null_terminated.
-  pub fn as_cstr(&self) -> &core::ffi::CStr {
-    if self.len < N && self.buf[self.len] == 0 {
-      core::ffi::CStr::from_bytes_with_nul(&self.buf[..=self.len]).unwrap_or(c"")
-    } else {
+  /// View as a mutable string slice.
+  pub fn as_mut_str(&mut self) -> &mut str {
+    // SAFETY: All push methods enforce UTF-8 validity.
+    unsafe { str::from_utf8_unchecked_mut(&mut self.buf[..self.len]) }
+  }
+
+  /// Return a raw pointer to the C string representation.
+  /// Guaranteed to be NUL-terminated at all times.
+  pub fn as_ptr(&self) -> *const libc::c_char {
+    self.buf.as_ptr() as *const libc::c_char
+  }
+
+  /// View as a borrowed CStr. Always safe and O(1) due to the trailing NUL invariant.
+  pub fn as_c_str(&self) -> &core::ffi::CStr {
+    if N == 0 {
       c""
+    } else {
+      // SAFETY: self.buf is of length N and self.buf[self.len] is guaranteed to be 0.
+      unsafe { core::ffi::CStr::from_bytes_with_nul_unchecked(&self.buf[..=self.len]) }
     }
   }
 
-  /// Returns a pointer to the string's data.
-  pub fn as_ptr(&self) -> *const u8 {
-    self.buf.as_ptr()
-  }
-
-  /// Returns the length of the strings.
-  pub fn len(&self) -> usize {
-    self.len
-  }
-
-  /// Check if the string is empty.
-  pub fn is_empty(&self) -> bool {
-    self.len == 0
-  }
-
-  /// Clears the string.
-  pub fn clear(&mut self) {
-    self.len = 0;
-  }
-
-  /// Push arbitrary bytes onto the string.
-  pub fn push_bytes(&mut self, bytes: &[u8]) -> &mut Self {
-    let n = bytes.len().min(N.saturating_sub(self.len));
-    self.buf[self.len..self.len + n].copy_from_slice(&bytes[..n]);
-    self.len += n;
-    self
-  }
-
-  /// Push a string literal onto the string.
+  /// Push a string slice, silently truncating at character boundaries if capacity is exceeded.
   pub fn push_str(&mut self, s: &str) -> &mut Self {
-    self.push_bytes(s.as_bytes());
+    let space = self.remaining_capacity();
+    let n = if space >= s.len() {
+      s.len()
+    } else if space > 0 {
+      // Find the last valid UTF-8 character boundary that fits
+      let mut valid_len = space;
+      while !s.is_char_boundary(valid_len) {
+        valid_len -= 1;
+      }
+      valid_len
+    } else {
+      0
+    };
+
+    if n > 0 {
+      self.buf[self.len..self.len + n].copy_from_slice(&s.as_bytes()[..n]);
+      self.len += n;
+      if self.len < N {
+        self.buf[self.len] = 0; // Maintain NUL invariant
+      }
+    }
+
     self
   }
 
-  /// Push a u32 onto the string. At least 10 bytes are allocated, since u32::MAX is 10 digits long.
-  pub fn push_u32(&mut self, num: u32) -> &mut Self {
-    let mut tmp = [0u8; 10];
-    let n = u32_to_decimal(num, &mut tmp);
-    self.push_bytes(&tmp[..n]);
-    self
+  /// Push a single character.
+  pub fn push_char(&mut self, c: char) -> &mut Self {
+    let mut encode_buf = [0u8; 4];
+    let s = c.encode_utf8(&mut encode_buf);
+    self.push_str(s)
   }
 
-  /// Push an i32 onto the string, with the negative sign.
+  /// Push an unsigned 32-bit integer formatted in base 10.
+  pub fn push_u32(&mut self, mut num: u32) -> &mut Self {
+    if num == 0 {
+      return self.push_str("0");
+    }
+    let mut tmp = [0u8; 10]; // u32::MAX is 10 decimal digits
+    let mut idx = 10;
+    while num > 0 {
+      idx -= 1;
+      tmp[idx] = b'0' + (num % 10) as u8;
+      num /= 10;
+    }
+    // SAFETY: tmp contains only ASCII digits '0'-'9'
+    let s = unsafe { str::from_utf8_unchecked(&tmp[idx..]) };
+    self.push_str(s)
+  }
+
+  /// Push a signed 32-bit integer formatted in base 10.
   pub fn push_i32(&mut self, num: i32) -> &mut Self {
     if num < 0 {
-      self.push_bytes(b"-");
+      self.push_str("-");
       self.push_u32(num.unsigned_abs())
     } else {
       self.push_u32(num as u32)
     }
   }
-
-  /// Null terminates the string.
-  /// Note: For a full string (string with length `N`), this will overwrite the last byte.
-  pub fn null_terminate(&mut self) -> &mut Self {
-    if self.len < N {
-      self.buf[self.len] = 0;
-    }
-    self
-  }
-}
-
-impl<const N: usize> Default for StringOnStack<N> {
-  fn default() -> Self {
-    Self::new()
-  }
-}
-
-/// Converts a u32 to it's decimal representation, stores it in the given byte slice, and returns
-/// the bytes written. The array must be at least 10 bytes long, since a u32::MAX is 10 digits long.
-pub fn u32_to_decimal(mut num: u32, buf: &mut [u8]) -> usize {
-  if num == 0 {
-    if !buf.is_empty() {
-      buf[0] = b'0';
-      return 1;
-    }
-    return 0;
-  }
-  let mut tmp = [0u8; 10];
-  let mut idx = 10;
-  while num > 0 {
-    idx -= 1;
-    tmp[idx] = b'0' + (num % 10) as u8;
-    num /= 10;
-  }
-  let n = (10 - idx).min(buf.len());
-  buf[..n].copy_from_slice(&tmp[idx..idx + n]);
-  n
 }
 
 /// Writes the buffer to the file descriptor.
@@ -152,4 +165,10 @@ pub fn write_stderr(msg: &[u8]) {
 /// Writes the buffer to stdout.
 pub fn write_stdout(msg: &[u8]) {
   let _ = write_fd(1, msg);
+}
+
+impl<const N: usize> Default for StringOnStack<N> {
+  fn default() -> Self {
+    Self::new()
+  }
 }

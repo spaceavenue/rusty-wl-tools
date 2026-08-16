@@ -3,12 +3,12 @@ use crate::protocols::wl_callback::SYNC_CALLBACK_ID;
 use crate::protocols::wl_display::{self, DISPLAY_ID};
 use crate::protocols::wl_registry::{self, REGISTRY_ID};
 use crate::transport::Connection;
-use crate::wire::{Message, parse_header, read_string, read_u32};
+use crate::wire::{Message, parse_header, read_str, read_u32};
 
 /// Implement to receive each advertised global during [`crawl`]. For e.g., match on `interface` and
 /// for the ones you want, call `conn.alloc_id()` and [`bind`] to claim it.
 pub trait GlobalHandler {
-  fn on_global(&mut self, conn: &mut Connection, name: u32, interface: &[u8], version: u32);
+  fn on_global(&mut self, conn: &mut Connection, name: u32, interface: &str, version: u32);
 }
 
 /// Build and send a `wl_registry::bind(name, interface, version, new_id)` request.
@@ -18,13 +18,13 @@ pub trait GlobalHandler {
 pub fn bind(
   conn: &Connection,
   name: u32,
-  interface: &[u8],
+  interface: &str,
   version: u32,
   new_id: u32,
 ) -> Result<(), WireError> {
   let mut msg = Message::new(REGISTRY_ID, crate::protocols::wl_registry::request::BIND);
   msg.write_u32(name);
-  msg.write_string(interface);
+  msg.write_str(interface);
   msg.write_u32(version);
   msg.write_u32(new_id);
   conn.send(&msg, None)
@@ -59,7 +59,7 @@ pub fn crawl<H: GlobalHandler>(conn: &mut Connection, handler: &mut H) -> Result
     while let Some(header) = parse_header(data, idx) {
       if header.sender == REGISTRY_ID && header.opcode == wl_registry::event::GLOBAL {
         let name = read_u32(data, idx + 8);
-        if let Some((interface, consumed)) = read_string(data, idx + 12) {
+        if let Some((interface, consumed)) = read_str(data, idx + 12) {
           let version = read_u32(data, idx + 12 + consumed);
           handler.on_global(conn, name, interface, version);
         }

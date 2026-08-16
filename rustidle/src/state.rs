@@ -40,9 +40,9 @@ impl State {
 impl GlobalHandler for State {
   // bind globals matching interfaces we want. we bind to the minimum of the client's wanted
   // version and the server's advertised version
-  fn on_global(&mut self, conn: &mut Connection, name: u32, interface: &[u8], version: u32) {
+  fn on_global(&mut self, conn: &mut Connection, name: u32, interface: &str, version: u32) {
     match interface {
-      b"wl_seat" => {
+      "wl_seat" => {
         if self.global.seat_id != 0 {
           return;
         }
@@ -52,7 +52,7 @@ impl GlobalHandler for State {
           Err(e) => e.write_diagnostic(),
         }
       }
-      b"ext_idle_notifier_v1" => {
+      "ext_idle_notifier_v1" => {
         let id = conn.alloc_id();
         match bind(conn, name, interface, clamp_version(2, version), id) {
           Ok(()) => self.global.idle_notifier_id = id,

@@ -114,7 +114,7 @@ fn run_ffmpeg(
       filter.push_str(":(ow-iw)/2:(oh-ih)/2");
     }
   }
-  filter.null_terminate();
+  // filter.null_terminate();
 
   // build ffmpeg argument vector
   let argv: [*const libc::c_char; 11] = [
@@ -151,9 +151,9 @@ fn run_dump_bgra(
   } else {
     mode_str.push_str("fit");
   }
-  w_str.null_terminate();
-  h_str.null_terminate();
-  mode_str.null_terminate();
+  // w_str.null_terminate();
+  // h_str.null_terminate();
+  // mode_str.null_terminate();
 
   // build dump-bgra argument vector: scale image to raw bgra pixels and stream to stdout
   let argv: [*const libc::c_char; 7] = [

@@ -2,7 +2,7 @@ use crate::error::{PROTOCOL_MESSAGE_CAP, ProtocolError, WireError};
 use crate::fmt_lite::StringOnStack;
 use crate::protocols::wl_display::DISPLAY_ID;
 use crate::transport::Connection;
-use crate::wire::{parse_header, read_string, read_u32};
+use crate::wire::{parse_header, read_str, read_u32};
 
 /// Implement to receive protocol events once the registry crawl is done.
 ///
@@ -25,8 +25,8 @@ pub fn dispatch_once<H: EventHandler>(
       let object_id = read_u32(data, idx + 8);
       let code = read_u32(data, idx + 12);
       let mut message: StringOnStack<PROTOCOL_MESSAGE_CAP> = StringOnStack::new();
-      if let Some((text, _)) = read_string(data, idx + 16) {
-        message.push_bytes(text);
+      if let Some((text, _)) = read_str(data, idx + 16) {
+        message.push_str(text);
       }
       return Err(WireError::Protocol(ProtocolError {
         object_id,
