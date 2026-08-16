@@ -26,8 +26,8 @@ unsafe extern "C" {
 unsafe extern "C" {}
 
 const LONGOPTS: [cli::LongOption; 3] = [
-  cli::LongOption::new("fill", cli::NO_ARGUMENT, 'f'),
-  cli::LongOption::new("namespace", cli::REQUIRED_ARGUMENT, 'n'),
+  cli::LongOption::new(c"fill", cli::NO_ARGUMENT, 'f'),
+  cli::LongOption::new(c"namespace", cli::REQUIRED_ARGUMENT, 'n'),
   cli::LONG_OPTION_TERMINATOR,
 ];
 

@@ -152,6 +152,8 @@ fn run_dump_bgra(
     mode_str.push_str("fit");
   }
   w_str.null_terminate();
+  h_str.null_terminate();
+  mode_str.null_terminate();
 
   // build dump-bgra argument vector: scale image to raw bgra pixels and stream to stdout
   let argv: [*const libc::c_char; 7] = [

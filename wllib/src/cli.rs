@@ -19,7 +19,7 @@ pub struct LongOption {
   pub val: libc::c_int,
 }
 impl LongOption {
-  pub const fn new(name: &str, has_arg: libc::c_int, val: char) -> Self {
+  pub const fn new(name: &core::ffi::CStr, has_arg: libc::c_int, val: char) -> Self {
     Self {
       name: name.as_ptr() as _,
       has_arg,
