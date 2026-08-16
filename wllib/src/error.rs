@@ -66,25 +66,24 @@ impl WireError {
   pub fn write_diagnostic(&self) {
     match self {
       WireError::Sys(e) => {
-        write_stderr(b"[wllib] syscall failed: ");
-        write_stderr(e.call.as_bytes());
-        write_stderr(b" (errno ");
-        let mut s = StringOnStack::<16>::new();
-        s.push_i32(e.errno);
+        let mut s = StringOnStack::<PROTOCOL_MESSAGE_CAP>::new();
+        s.push_str("[wllib] syscall failed: ")
+          .push_str(e.call)
+          .push_str(" (errno ")
+          .push_i32(e.errno)
+          .push_str(")");
         write_stderr(s.as_bytes());
-        write_stderr(b")\n");
+        write_stderr(b"\n");
       }
       WireError::Protocol(p) => {
-        write_stderr(b"[wllib] wayland protocol error: object ");
-        let mut obj = StringOnStack::<16>::new();
-        obj.push_u32(p.object_id);
-        write_stderr(obj.as_bytes());
-        write_stderr(b", code ");
-        let mut code = StringOnStack::<16>::new();
-        code.push_u32(p.code);
-        write_stderr(code.as_bytes());
-        write_stderr(b", message: ");
-        write_stderr(p.message.as_bytes());
+        let mut s = StringOnStack::<PROTOCOL_MESSAGE_CAP>::new();
+        s.push_str("[wllib] wayland protocol error: object ")
+          .push_u32(p.object_id)
+          .push_str(", code")
+          .push_u32(p.code)
+          .push_str(", message: ")
+          .push_bytes(p.message.as_bytes());
+        write_stderr(s.as_bytes());
         write_stderr(b"\n");
       }
       WireError::Environment => {

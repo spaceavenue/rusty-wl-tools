@@ -16,61 +16,84 @@ impl<const N: usize> StringOnStack<N> {
     }
   }
 
+  /// Returns the stored string as bytes.
   pub fn as_bytes(&self) -> &[u8] {
     &self.buf[..self.len]
   }
 
+  /// Returns the string as a string slice.
+  pub fn as_str(&self) -> &str {
+    core::str::from_utf8(self.as_bytes()).unwrap_or_default()
+  }
+
+  /// Returns the string as a c_str. Returns an empty c_str if not null_terminated.
+  pub fn as_cstr(&self) -> &core::ffi::CStr {
+    if self.len < N && self.buf[self.len] == 0 {
+      core::ffi::CStr::from_bytes_with_nul(&self.buf[..=self.len]).unwrap_or(c"")
+    } else {
+      c""
+    }
+  }
+
+  /// Returns a pointer to the string's data.
   pub fn as_ptr(&self) -> *const u8 {
     self.buf.as_ptr()
   }
 
+  /// Returns the length of the strings.
   pub fn len(&self) -> usize {
     self.len
   }
 
+  /// Check if the string is empty.
   pub fn is_empty(&self) -> bool {
     self.len == 0
   }
 
+  /// Clears the string.
   pub fn clear(&mut self) {
     self.len = 0;
   }
 
   /// Push arbitrary bytes onto the string.
-  pub fn push_bytes(&mut self, bytes: &[u8]) {
-    let space = N.saturating_sub(self.len);
-    let n = bytes.len().min(space);
+  pub fn push_bytes(&mut self, bytes: &[u8]) -> &mut Self {
+    let n = bytes.len().min(N.saturating_sub(self.len));
     self.buf[self.len..self.len + n].copy_from_slice(&bytes[..n]);
     self.len += n;
+    self
   }
 
   /// Push a string literal onto the string.
-  pub fn push_str(&mut self, s: &str) {
+  pub fn push_str(&mut self, s: &str) -> &mut Self {
     self.push_bytes(s.as_bytes());
+    self
   }
 
   /// Push a u32 onto the string. At least 10 bytes are allocated, since u32::MAX is 10 digits long.
-  pub fn push_u32(&mut self, num: u32) {
+  pub fn push_u32(&mut self, num: u32) -> &mut Self {
     let mut tmp = [0u8; 10];
     let n = u32_to_decimal(num, &mut tmp);
     self.push_bytes(&tmp[..n]);
+    self
   }
 
   /// Push an i32 onto the string, with the negative sign.
-  pub fn push_i32(&mut self, num: i32) {
+  pub fn push_i32(&mut self, num: i32) -> &mut Self {
     if num < 0 {
       self.push_bytes(b"-");
-      self.push_u32(num.unsigned_abs());
+      self.push_u32(num.unsigned_abs())
     } else {
-      self.push_u32(num as u32);
+      self.push_u32(num as u32)
     }
   }
 
   /// Null terminates the string.
-  pub fn null_terminate(&mut self) {
+  /// Note: For a full string (string with length `N`), this will overwrite the last byte.
+  pub fn null_terminate(&mut self) -> &mut Self {
     if self.len < N {
       self.buf[self.len] = 0;
     }
+    self
   }
 }
 
@@ -103,18 +126,30 @@ pub fn u32_to_decimal(mut num: u32, buf: &mut [u8]) -> usize {
 }
 
 /// Writes the buffer to the file descriptor.
-pub fn write_fd(fd: libc::c_int, msg: &[u8]) {
-  unsafe {
-    libc::write(fd, msg.as_ptr() as *const libc::c_void, msg.len());
+pub fn write_fd(fd: libc::c_int, mut msg: &[u8]) -> Result<(), crate::error::SysError> {
+  while !msg.is_empty() {
+    let res = unsafe { libc::write(fd, msg.as_ptr() as *const libc::c_void, msg.len()) };
+    if res > 0 {
+      msg = &msg[res as usize..];
+    } else if res < 0 {
+      let err = crate::error::SysError::last("write");
+      if err.errno == libc::EINTR {
+        continue;
+      }
+      return Err(err);
+    } else {
+      break;
+    }
   }
+  Ok(())
 }
 
 /// Writes the buffer to stderr.
 pub fn write_stderr(msg: &[u8]) {
-  write_fd(2, msg);
+  let _ = write_fd(2, msg);
 }
 
 /// Writes the buffer to stdout.
 pub fn write_stdout(msg: &[u8]) {
-  write_fd(1, msg);
+  let _ = write_fd(1, msg);
 }

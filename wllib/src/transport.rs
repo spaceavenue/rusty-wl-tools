@@ -39,12 +39,17 @@ impl Connection {
       if dest_idx < 107 {
         sun.sun_path[dest_idx] = b'/' as libc::c_char;
         dest_idx += 1;
+      } else {
+        return Err(WireError::Environment);
       }
       let mut src = display;
       while *src != 0 && dest_idx < 107 {
         sun.sun_path[dest_idx] = *src;
         dest_idx += 1;
         src = src.add(1);
+      }
+      if dest_idx >= 107 {
+        return Err(WireError::Environment);
       }
     }
 
