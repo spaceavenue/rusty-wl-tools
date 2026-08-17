@@ -12,7 +12,7 @@ impl AppError {
     match self {
       AppError::Wire(e) => e.write_diagnostic(),
       AppError::Sys(e) => WireError::Sys(*e).write_diagnostic(),
-      AppError::InvalidTemp => fmt_lite::write_stderr(b"[rustemp] invalid temperature\n"),
+      AppError::InvalidTemp => fmt_lite::write_stderr("[rustemp] invalid temperature\n"),
     }
   }
 }

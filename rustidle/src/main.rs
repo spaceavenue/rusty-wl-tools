@@ -30,12 +30,12 @@ extern "C" fn handle_sigusr1(_sig: libc::c_int) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_int {
   if argc != 2 {
-    write_stderr(b"Usage: rustidle <config-file>\n");
+    write_stderr("Usage: rustidle <config-file>\n");
     unsafe { libc::exit(1) };
   }
   let config_path = unsafe { *argv.add(1) };
   if config_path.is_null() {
-    write_stderr(b"Usage: rustidle <config-file>\n");
+    write_stderr("Usage: rustidle <config-file>\n");
     unsafe { libc::exit(1) };
   }
 

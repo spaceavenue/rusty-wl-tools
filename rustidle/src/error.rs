@@ -17,8 +17,8 @@ impl AppError {
     match self {
       AppError::Wire(e) => e.write_diagnostic(),
       AppError::Sys(e) => WireError::Sys(*e).write_diagnostic(),
-      AppError::CommandFailed => write_stderr(b"Command failed to execute\n"),
-      AppError::InvalidTimeout => write_stderr(b"Timeout must be at least 1s\n"),
+      AppError::CommandFailed => write_stderr("Command failed to execute\n"),
+      AppError::InvalidTimeout => write_stderr("Timeout must be at least 1s\n"),
     }
   }
 }

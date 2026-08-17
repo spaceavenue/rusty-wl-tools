@@ -20,7 +20,7 @@ use crate::error::AppError;
 pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_int {
   let mut config = Config::default();
   if argc != 2 {
-    write_stderr(b"Usage: rustemp <temp>\n");
+    write_stderr("Usage: rustemp <temp>\n");
     unsafe { libc::exit(1) };
   }
 

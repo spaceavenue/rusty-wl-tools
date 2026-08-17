@@ -26,7 +26,7 @@ pub fn dispatch_once<H: EventHandler>(
       let code = read_u32(data, idx + 12);
       let mut message: StringOnStack<MESSAGE_CAP> = StringOnStack::new();
       if let Some((text, _)) = read_str(data, idx + 16) {
-        message.push_str(text);
+        message.push(text);
       }
       return Err(WireError::Protocol(ProtocolError {
         object_id,

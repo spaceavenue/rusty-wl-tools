@@ -68,7 +68,7 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
   }
 
   if config.image_path.is_none() {
-    write_stderr(b"Usage: rustbg [-f | --fill] [-n | --namespace <name>] <image path>\n");
+    write_stderr("Usage: rustbg [-f | --fill] [-n | --namespace <name>] <image path>\n");
     unsafe { libc::exit(1) };
   }
 

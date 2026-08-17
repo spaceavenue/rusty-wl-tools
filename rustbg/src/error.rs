@@ -23,13 +23,13 @@ impl AppError {
       AppError::Sys(e) => WireError::Sys(*e).write_diagnostic(),
       #[cfg(feature = "ffmpeg")]
       AppError::ImageDecodeError => fmt_lite::write_stderr(
-        b"[rustbg] image decode error: ffmpeg produced fewer bytes than expected\n",
+        "[rustbg] image decode error: ffmpeg produced fewer bytes than expected\n",
       ),
       #[cfg(not(feature = "ffmpeg"))]
       AppError::ImageDecodeError => fmt_lite::write_stderr(
-        b"[rustbg] image decode error: dump-bgra produced fewer bytes than expected\n",
+        "[rustbg] image decode error: dump-bgra produced fewer bytes than expected\n",
       ),
-      AppError::MissingImagePath => fmt_lite::write_stderr(b"[rustbg] no image path configured\n"),
+      AppError::MissingImagePath => fmt_lite::write_stderr("[rustbg] no image path configured\n"),
     }
   }
 }

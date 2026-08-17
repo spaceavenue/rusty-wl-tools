@@ -94,27 +94,29 @@ fn run_ffmpeg(
 ) -> Result<(), AppError> {
   let mut filter = StringOnStack::<96>::new();
 
-  filter.push_str("scale=");
-  filter.push_u32(out_width);
-  filter.push_str(":");
-  filter.push_u32(out_height);
+  filter
+    .push("scale=")
+    .push(out_width)
+    .push(":")
+    .push(out_height);
 
   match fill {
     true => {
-      filter.push_str(":force_original_aspect_ratio=increase,crop=");
-      filter.push_u32(out_width);
-      filter.push_str(":");
-      filter.push_u32(out_height);
+      filter
+        .push(":force_original_aspect_ratio=increase,crop=")
+        .push(out_width)
+        .push(":")
+        .push(out_height);
     }
     false => {
-      filter.push_str(":force_original_aspect_ratio=decrease,pad=");
-      filter.push_u32(out_width);
-      filter.push_str(":");
-      filter.push_u32(out_height);
-      filter.push_str(":(ow-iw)/2:(oh-ih)/2");
+      filter
+        .push(":force_original_aspect_ratio=decrease,pad=")
+        .push(out_width)
+        .push(":")
+        .push(out_height)
+        .push(":(ow-iw)/2:(oh-ih)/2");
     }
   }
-  // filter.null_terminate();
 
   // build ffmpeg argument vector
   let argv: [*const libc::c_char; 11] = [
@@ -142,14 +144,14 @@ fn run_dump_bgra(
   path: *const libc::c_char,
 ) -> Result<(), AppError> {
   let mut w_str = StringOnStack::<10>::new();
-  w_str.push_u32(out_width);
+  w_str.push(out_width);
   let mut h_str = StringOnStack::<10>::new();
-  h_str.push_u32(out_height);
+  h_str.push(out_height);
   let mut mode_str = StringOnStack::<5>::new();
   if fill {
-    mode_str.push_str("fill");
+    mode_str.push("fill");
   } else {
-    mode_str.push_str("fit");
+    mode_str.push("fit");
   }
   // w_str.null_terminate();
   // h_str.null_terminate();
