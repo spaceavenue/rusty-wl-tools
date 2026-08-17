@@ -2,7 +2,10 @@ cargo-features = ["panic-immediate-abort"]
 
 [workspace]
 resolver = "2"
-members = ["wllib", "rustbg", "rustemp", "rustidle"]
+members = ["wllib", "rustbg", "rustemp", "rustidle", "rustclip"]
+
+[profile.dev]
+panic = "immediate-abort"
 
 [profile.release]
 opt-level = "z"
