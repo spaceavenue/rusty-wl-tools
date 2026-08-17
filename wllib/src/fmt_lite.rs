@@ -238,6 +238,3 @@ pub fn write_stderr(msg: impl AsRef<[u8]>) {
 pub fn write_stdout(msg: impl AsRef<[u8]>) {
   let _ = write_fd(1, msg);
 }
-
-  }
-}
