@@ -3,7 +3,6 @@
 
 pub mod error;
 pub mod image_load;
-pub mod remove_self;
 pub mod shm;
 pub mod state;
 
@@ -145,13 +144,6 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
     state.outputs[i].wl_surface_id = surf_id;
     state.outputs[i].layer_surface_id = layer_surf_id;
   }
-
-  // NULL -> map surface
-  // probably doesnt even do anything atp
-  // (not like it did before either, madvise is just a "strong suggestion")
-  // but still, for the illusion ig :3
-  // also the name is kinda funny
-  remove_self::evict_self_from_ram();
 
   // main wayland event dispatch loop
   loop {

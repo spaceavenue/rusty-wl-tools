@@ -2,6 +2,8 @@
 //! There are also convenience methods, such as for writing to file descriptors, and methods for
 //! writing to stderr and stdout.
 
+use core::ffi::CStr;
+
 /// Lightweight formatter trait in absence of core::fmt.
 pub trait FmtLite {
   fn format_into<const N: usize>(self, buf: &mut StringOnStack<N>);
@@ -10,6 +12,12 @@ pub trait FmtLite {
 impl FmtLite for &str {
   fn format_into<const N: usize>(self, buf: &mut StringOnStack<N>) {
     buf.push_str(self);
+  }
+}
+
+impl FmtLite for &CStr {
+  fn format_into<const N: usize>(self, buf: &mut StringOnStack<N>) {
+    buf.push_cstr(self);
   }
 }
 
@@ -110,33 +118,51 @@ impl<const N: usize> StringOnStack<N> {
   }
 
   /// View as a borrowed CStr. Always safe and O(1) due to the trailing NUL invariant.
-  pub fn as_c_str(&self) -> &core::ffi::CStr {
+  pub fn as_c_str(&self) -> &CStr {
     if N == 0 {
       c""
     } else {
       // SAFETY: self.buf is of length N and self.buf[self.len] is guaranteed to be 0.
-      unsafe { core::ffi::CStr::from_bytes_with_nul_unchecked(&self.buf[..=self.len]) }
+      unsafe { CStr::from_bytes_with_nul_unchecked(&self.buf[..=self.len]) }
     }
   }
 
   /// Push a string slice, silently truncating at character boundaries if capacity is exceeded.
   pub fn push_str(&mut self, s: &str) -> &mut Self {
     let space = self.remaining_capacity();
-    let n = if space >= s.len() {
-      s.len()
-    } else if space > 0 {
-      // Find the last valid UTF-8 character boundary that fits
-      let mut valid_len = space;
-      while !s.is_char_boundary(valid_len) {
-        valid_len -= 1;
-      }
-      valid_len
-    } else {
-      0
-    };
+    let mut n = s.len().min(space);
+    while !s.is_char_boundary(n) {
+      n -= 1;
+    }
 
     if n > 0 {
       self.buf[self.len..self.len + n].copy_from_slice(&s.as_bytes()[..n]);
+      self.len += n;
+      if self.len < N {
+        self.buf[self.len] = 0; // Maintain NUL invariant
+      }
+    }
+
+    self
+  }
+
+  pub fn push_cstr(&mut self, s: &CStr) -> &mut Self {
+    let space = self.remaining_capacity();
+    if space == 0 {
+      return self;
+    }
+
+    let bytes = s.to_bytes();
+    let max_len = bytes.len().min(space);
+    let slice = &bytes[..max_len];
+
+    let n = match str::from_utf8(slice) {
+      Ok(valid) => valid.len(),
+      Err(err) => err.valid_up_to(),
+    };
+
+    if n > 0 {
+      self.buf[self.len..self.len + n].copy_from_slice(&slice[..n]);
       self.len += n;
       if self.len < N {
         self.buf[self.len] = 0; // Maintain NUL invariant
@@ -206,6 +232,40 @@ impl<const N: usize> Default for StringOnStack<N> {
 impl<const N: usize> AsRef<[u8]> for StringOnStack<N> {
   fn as_ref(&self) -> &[u8] {
     self.as_bytes()
+  }
+}
+
+impl<const N: usize> PartialEq for StringOnStack<N> {
+  fn eq(&self, other: &Self) -> bool {
+    self.as_bytes() == other.as_bytes()
+  }
+}
+
+impl<const N: usize> PartialEq<str> for StringOnStack<N> {
+  fn eq(&self, other: &str) -> bool {
+    self.as_bytes() == other.as_bytes()
+  }
+}
+
+impl<const N: usize> PartialEq<CStr> for StringOnStack<N> {
+  fn eq(&self, other: &CStr) -> bool {
+    self.as_bytes() == other.to_bytes()
+  }
+}
+
+impl<const N: usize> From<&str> for StringOnStack<N> {
+  fn from(value: &str) -> Self {
+    let mut s = Self::new();
+    s.push(value);
+    s
+  }
+}
+
+impl<const N: usize> From<&CStr> for StringOnStack<N> {
+  fn from(value: &CStr) -> Self {
+    let mut s = Self::new();
+    s.push(value);
+    s
   }
 }
 
