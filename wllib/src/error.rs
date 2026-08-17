@@ -20,9 +20,9 @@ impl SysError {
   }
 }
 
-/// Max length of a `wl_display::error` message body we'll keep for diagnostics. Longer messages
-/// are truncated rather than allocated.
-pub const PROTOCOL_MESSAGE_CAP: usize = 128;
+/// Max length of a message body we'll keep for diagnostics. Longer messages are truncated rather
+/// than allocated.
+pub const MESSAGE_CAP: usize = 128;
 
 /// A parsed `wl_display::error` event: which object misbehaved, the protocol-defined error code,
 /// and the compositor's human-readable explanation.
@@ -30,15 +30,15 @@ pub const PROTOCOL_MESSAGE_CAP: usize = 128;
 pub struct ProtocolError {
   pub object_id: u32,
   pub code: u32,
-  pub message: StringOnStack<PROTOCOL_MESSAGE_CAP>,
+  pub message: StringOnStack<MESSAGE_CAP>,
 }
 impl ProtocolError {
   pub fn from(buf: &[u8], idx: usize) -> Self {
     let object_id = read_u32(buf, idx + 8);
     let code = read_u32(buf, idx + 12);
-    let mut message: StringOnStack<PROTOCOL_MESSAGE_CAP> = StringOnStack::new();
+    let mut message: StringOnStack<MESSAGE_CAP> = StringOnStack::new();
     if let Some((text, _)) = read_str(buf, idx + 16) {
-      message.push_str(text);
+      message.push(text);
     }
     Self {
       object_id,
@@ -66,31 +66,31 @@ impl WireError {
   pub fn write_diagnostic(&self) {
     match self {
       WireError::Sys(e) => {
-        let mut s = StringOnStack::<PROTOCOL_MESSAGE_CAP>::new();
-        s.push_str("[wllib] syscall failed: ")
-          .push_str(e.call)
-          .push_str(" (errno ")
-          .push_i32(e.errno)
-          .push_str(")");
-        write_stderr(s.as_bytes());
-        write_stderr(b"\n");
+        let mut s = StringOnStack::<MESSAGE_CAP>::new();
+        s.push("[wllib] syscall failed: ")
+          .push(e.call)
+          .push(" (errno ")
+          .push(e.errno)
+          .push(")")
+          .push("\n");
+        write_stderr(s);
       }
       WireError::Protocol(p) => {
-        let mut s = StringOnStack::<PROTOCOL_MESSAGE_CAP>::new();
-        s.push_str("[wllib] wayland protocol error: object ")
-          .push_u32(p.object_id)
-          .push_str(", code ")
-          .push_u32(p.code)
-          .push_str(", message: ")
-          .push_str(p.message.as_str());
-        write_stderr(s.as_bytes());
-        write_stderr(b"\n");
+        let mut s = StringOnStack::<MESSAGE_CAP>::new();
+        s.push("[wllib] wayland protocol error: object ")
+          .push(p.object_id)
+          .push(", code ")
+          .push(p.code)
+          .push(", message: ")
+          .push(p.message.as_str())
+          .push("\n");
+        write_stderr(s);
       }
       WireError::Environment => {
-        write_stderr(b"[wllib] WAYLAND_DISPLAY or XDG_RUNTIME_DIR not set\n");
+        write_stderr("[wllib] WAYLAND_DISPLAY or XDG_RUNTIME_DIR not set\n");
       }
       WireError::ConnectionClosed => {
-        write_stderr(b"[wllib] connection closed by compositor\n");
+        write_stderr("[wllib] connection closed by compositor\n");
       }
     }
   }

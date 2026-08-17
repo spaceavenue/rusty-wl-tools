@@ -2,6 +2,47 @@
 //! There are also convenience methods, such as for writing to file descriptors, and methods for
 //! writing to stderr and stdout.
 
+/// Lightweight formatter trait in absence of core::fmt.
+pub trait FmtLite {
+  fn format_into<const N: usize>(self, buf: &mut StringOnStack<N>);
+}
+
+impl FmtLite for &str {
+  fn format_into<const N: usize>(self, buf: &mut StringOnStack<N>) {
+    buf.push_str(self);
+  }
+}
+
+impl FmtLite for char {
+  fn format_into<const N: usize>(self, buf: &mut StringOnStack<N>) {
+    buf.push_char(self);
+  }
+}
+
+impl FmtLite for u32 {
+  fn format_into<const N: usize>(self, buf: &mut StringOnStack<N>) {
+    buf.push_u32(self);
+  }
+}
+
+impl FmtLite for i32 {
+  fn format_into<const N: usize>(self, buf: &mut StringOnStack<N>) {
+    buf.push_i32(self);
+  }
+}
+
+impl FmtLite for u64 {
+  fn format_into<const N: usize>(self, buf: &mut StringOnStack<N>) {
+    buf.push_u64(self);
+  }
+}
+
+impl FmtLite for i64 {
+  fn format_into<const N: usize>(self, buf: &mut StringOnStack<N>) {
+    buf.push_i64(self);
+  }
+}
+
 /// Allocate a fixed size string on the stack.
 #[derive(Clone, Copy)]
 pub struct StringOnStack<const N: usize> {
@@ -40,7 +81,9 @@ impl<const N: usize> StringOnStack<N> {
   /// Clear the string.
   pub fn clear(&mut self) {
     self.len = 0;
-    self.buf[0] = 0;
+    if N > 0 {
+      self.buf[0] = 0;
+    }
   }
 
   /// View as byte slice.
@@ -110,13 +153,13 @@ impl<const N: usize> StringOnStack<N> {
     self.push_str(s)
   }
 
-  /// Push an unsigned 32-bit integer formatted in base 10.
-  pub fn push_u32(&mut self, mut num: u32) -> &mut Self {
+  /// Push an unsigned 64-bit integer formatted in base 10.
+  pub fn push_u64(&mut self, mut num: u64) -> &mut Self {
     if num == 0 {
       return self.push_str("0");
     }
-    let mut tmp = [0u8; 10]; // u32::MAX is 10 decimal digits
-    let mut idx = 10;
+    let mut tmp = [0u8; 20]; // u64::MAX is 20 decimal digits
+    let mut idx = 20;
     while num > 0 {
       idx -= 1;
       tmp[idx] = b'0' + (num % 10) as u8;
@@ -127,19 +170,48 @@ impl<const N: usize> StringOnStack<N> {
     self.push_str(s)
   }
 
-  /// Push a signed 32-bit integer formatted in base 10.
-  pub fn push_i32(&mut self, num: i32) -> &mut Self {
+  /// Push a signed 64-bit integer formatted in base 10.
+  pub fn push_i64(&mut self, num: i64) -> &mut Self {
     if num < 0 {
       self.push_str("-");
-      self.push_u32(num.unsigned_abs())
+      self.push_u64(num.unsigned_abs())
     } else {
-      self.push_u32(num as u32)
+      self.push_u64(num as u64)
     }
+  }
+
+  /// Push an unsigned 32-bit integer formatted in base 10.
+  pub fn push_u32(&mut self, num: u32) -> &mut Self {
+    self.push_u64(num as u64)
+  }
+
+  /// Push a signed 32-bit integer formatted in base 10.
+  pub fn push_i32(&mut self, num: i32) -> &mut Self {
+    self.push_i64(num as i64)
+  }
+
+  /// Push anything that implements `FmtLite` (currently: &str, char, u32, i32)
+  pub fn push<T: FmtLite>(&mut self, value: T) -> &mut Self {
+    value.format_into(self);
+    self
+  }
+}
+
+impl<const N: usize> Default for StringOnStack<N> {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+impl<const N: usize> AsRef<[u8]> for StringOnStack<N> {
+  fn as_ref(&self) -> &[u8] {
+    self.as_bytes()
   }
 }
 
 /// Writes the buffer to the file descriptor.
-pub fn write_fd(fd: libc::c_int, mut msg: &[u8]) -> Result<(), crate::error::SysError> {
+pub fn write_fd(fd: libc::c_int, msg: impl AsRef<[u8]>) -> Result<(), crate::error::SysError> {
+  let mut msg = msg.as_ref();
   while !msg.is_empty() {
     let res = unsafe { libc::write(fd, msg.as_ptr() as *const libc::c_void, msg.len()) };
     if res > 0 {
@@ -158,17 +230,14 @@ pub fn write_fd(fd: libc::c_int, mut msg: &[u8]) -> Result<(), crate::error::Sys
 }
 
 /// Writes the buffer to stderr.
-pub fn write_stderr(msg: &[u8]) {
+pub fn write_stderr(msg: impl AsRef<[u8]>) {
   let _ = write_fd(2, msg);
 }
 
 /// Writes the buffer to stdout.
-pub fn write_stdout(msg: &[u8]) {
+pub fn write_stdout(msg: impl AsRef<[u8]>) {
   let _ = write_fd(1, msg);
 }
 
-impl<const N: usize> Default for StringOnStack<N> {
-  fn default() -> Self {
-    Self::new()
   }
 }

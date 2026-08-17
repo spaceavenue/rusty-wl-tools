@@ -97,7 +97,6 @@ pub fn parse_header(buf: &[u8], idx: usize) -> Option<MessageHeader> {
 pub struct Message {
   header: MessageHeader,
   data: [u8; 256],
-  // len: usize,
 }
 
 impl Message {

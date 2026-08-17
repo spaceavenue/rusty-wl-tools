@@ -1,4 +1,4 @@
-use crate::error::{PROTOCOL_MESSAGE_CAP, ProtocolError, WireError};
+use crate::error::{MESSAGE_CAP, ProtocolError, WireError};
 use crate::fmt_lite::StringOnStack;
 use crate::protocols::wl_display::DISPLAY_ID;
 use crate::transport::Connection;
@@ -24,7 +24,7 @@ pub fn dispatch_once<H: EventHandler>(
     if header.sender == DISPLAY_ID && header.opcode == crate::protocols::wl_display::event::ERROR {
       let object_id = read_u32(data, idx + 8);
       let code = read_u32(data, idx + 12);
-      let mut message: StringOnStack<PROTOCOL_MESSAGE_CAP> = StringOnStack::new();
+      let mut message: StringOnStack<MESSAGE_CAP> = StringOnStack::new();
       if let Some((text, _)) = read_str(data, idx + 16) {
         message.push_str(text);
       }
