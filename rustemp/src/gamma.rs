@@ -50,50 +50,53 @@ pub fn kelvin_to_rgb(kelvin: f64) -> (f64, f64, f64) {
 
 pub fn get_gamma_table_fd(size: usize, temp_kelvin: f64) -> Result<i32, AppError> {
   let (r_factor, g_factor, b_factor) = kelvin_to_rgb(temp_kelvin);
-  unsafe {
-    let fd = libc::memfd_create(c"rustemp-memfd".as_ptr(), libc::MFD_ALLOW_SEALING);
-    if fd < 0 {
-      return Err(AppError::Sys(SysError::last("memfd_create")));
-    }
+  let fd = unsafe { libc::memfd_create(c"rustemp-memfd".as_ptr(), libc::MFD_ALLOW_SEALING) };
+  if fd < 0 {
+    return Err(AppError::Sys(SysError::last("memfd_create")));
+  }
 
-    // gamma tables contain three ramps (R, G, B), each with `size` elements of 16-bit values (2
-    // bytes)
-    let fd_size = size * 3 * 2;
+  // gamma tables contain three ramps (R, G, B), each with `size` elements of 16-bit values (2
+  // bytes)
+  let fd_size = size * 3 * 2;
+  unsafe {
     if libc::ftruncate(fd, fd_size as libc::off_t) < 0 {
       let err = SysError::last("ftruncate");
       libc::close(fd);
       return Err(AppError::Sys(err));
     }
+  }
 
-    // map the file to fill it
-    let ptr = libc::mmap(
+  // map the file to fill it
+  let ptr = unsafe {
+    libc::mmap(
       core::ptr::null_mut(),
       fd_size,
       libc::PROT_WRITE,
       libc::MAP_SHARED,
       fd,
       0,
-    );
-    if ptr == libc::MAP_FAILED {
-      let err = SysError::last("mmap");
-      libc::close(fd);
-      return Err(AppError::Sys(err));
-    }
+    )
+  };
 
-    let slice = core::slice::from_raw_parts_mut(ptr as *mut u16, size * 3);
-
-    // generate gamma curves scaled by the RGB color temperature factors
-    for i in 0..size {
-      let t = i as f64 / (size - 1) as f64;
-      // red
-      slice[i] = (t * r_factor * 65535.0) as u16;
-      // greerg
-      slice[size + i] = (t * g_factor * 65535.0) as u16;
-      // blue
-      slice[2 * size + i] = (t * b_factor * 65535.0) as u16;
-    }
-
-    libc::munmap(ptr, fd_size);
-    Ok(fd)
+  if ptr == libc::MAP_FAILED {
+    let err = SysError::last("mmap");
+    unsafe { libc::close(fd) };
+    return Err(AppError::Sys(err));
   }
+
+  let slice = unsafe { core::slice::from_raw_parts_mut(ptr as *mut u16, size * 3) };
+
+  // generate gamma curves scaled by the RGB color temperature factors
+  for i in 0..size {
+    let t = i as f64 / (size.saturating_sub(1).max(1)) as f64;
+    // red
+    slice[i] = (t * r_factor * 65535.0) as u16;
+    // greerg
+    slice[size + i] = (t * g_factor * 65535.0) as u16;
+    // blue
+    slice[2 * size + i] = (t * b_factor * 65535.0) as u16;
+  }
+
+  unsafe { libc::munmap(ptr, fd_size) };
+  Ok(fd)
 }
