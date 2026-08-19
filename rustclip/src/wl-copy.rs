@@ -10,6 +10,7 @@
 use rustclip::error::AppError;
 use rustclip::mime::{MimeType, PREFERRED_TEXT_MIMES};
 use wllib::cli;
+use wllib::dispatch::EventHandler;
 use wllib::error::{SysError, WireError};
 use wllib::fmt_lite::write_stderr;
 use wllib::protocols::{
@@ -52,6 +53,11 @@ impl GlobalHandler for State {
       _ => (),
     }
   }
+}
+
+// stub for satisfying `crawl`'s EventHandler trait bound.
+impl EventHandler for State {
+  fn handle_event(&mut self, _conn: &mut Connection, _sender: u32, _opcode: u16, _data: &[u8]) {}
 }
 
 #[link(name = "c", kind = "static")]

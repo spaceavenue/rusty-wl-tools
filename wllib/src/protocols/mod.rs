@@ -5,8 +5,11 @@
 //! Every constant here was cross-checked against the upstream protocol XML rather than
 //! transcribed from memory:
 //! - core interfaces: <https://github.com/wayland-mirror/wayland> `protocol/wayland.xml`
-//! - wlr-layer-shell / wlr-gamma-control: <https://github.com/swaywm/wlr-protocols>
-//!   `unstable/*.xml`
+//! - wlr-* extensions (wlr-layer-shell, wlr-gamma-control, wlr-data-control):
+//!   <https://github.com/swaywm/wlr-protocols> `unstable/*.xml`
+//! - ext-*/xdg-output staging protocols: <https://github.com/wayland-mirror/wayland-protocols>
+//!   (`xdg_output` verified against this system's own
+//!   `/usr/share/wayland-protocols/unstable/xdg-output/xdg-output-unstable-v1.xml`, which matches)
 //!
 //! Adding support for another interface (e.g. `xdg_shell`, `wl_seat`) means adding one small file
 //! here, cross-checked the same way, rather than hand-writing opcodes at each call site.
@@ -30,3 +33,5 @@ pub mod zwlr_gamma_control_manager_v1;
 pub mod zwlr_gamma_control_v1;
 pub mod zwlr_layer_shell_v1;
 pub mod zwlr_layer_surface_v1;
+pub mod zxdg_output_manager_v1;
+pub mod zxdg_output_v1;

@@ -9,6 +9,12 @@ pub trait FmtLite {
   fn format_into<const N: usize>(self, buf: &mut StringOnStack<N>);
 }
 
+impl<const M: usize> FmtLite for StringOnStack<M> {
+  fn format_into<const N: usize>(self, buf: &mut StringOnStack<N>) {
+    buf.push_self(self);
+  }
+}
+
 impl FmtLite for &str {
   fn format_into<const N: usize>(self, buf: &mut StringOnStack<N>) {
     buf.push_str(self);
@@ -177,6 +183,11 @@ impl<const N: usize> StringOnStack<N> {
     let mut encode_buf = [0u8; 4];
     let s = c.encode_utf8(&mut encode_buf);
     self.push_str(s)
+  }
+
+  /// Push another StringOnStack.
+  pub fn push_self<const M: usize>(&mut self, s: StringOnStack<M>) {
+    self.push_str(s.as_str());
   }
 
   /// Push an unsigned 64-bit integer formatted in base 10.

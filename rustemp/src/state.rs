@@ -1,10 +1,13 @@
 use wllib::dispatch::EventHandler;
+use wllib::fmt_lite::write_stderr;
 use wllib::protocols::zwlr_gamma_control_v1;
 use wllib::registry::{GlobalHandler, bind, clamp_version};
 use wllib::transport::Connection;
 use wllib::wire::{Message, read_u32};
 
 use crate::gamma;
+
+pub const MAX_OUTPUTS: usize = 8;
 
 // tracks registered object ids
 #[derive(Default)]
@@ -97,7 +100,8 @@ impl GlobalHandler for State {
         }
       }
       "wl_output" => {
-        if self.output_len >= 4 {
+        if self.output_len >= MAX_OUTPUTS {
+          write_stderr("Maximum outputs limit reached\n");
           return;
         }
         let id = conn.alloc_id();
