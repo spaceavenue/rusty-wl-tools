@@ -1,13 +1,15 @@
 use wllib::dispatch::EventHandler;
 use wllib::error::{SysError, WireError};
-use wllib::fmt_lite::write_stdout;
+use wllib::fmt_lite::{write_stderr, write_stdout};
 use wllib::protocols::{zwlr_data_control_device_v1, zwlr_data_control_offer_v1};
 use wllib::registry::{GlobalHandler, bind, clamp_version};
 use wllib::transport::Connection;
 use wllib::wire::{Message, read_str, read_u32};
 
 use crate::error::AppError;
-use crate::mime::{MAX_MIME_TYPES, MimeType, pick_mime};
+use crate::mime::{
+  MAX_MIME_TYPES, MimeType, classify_offer_types, is_text_mime, mime_type_to_request,
+};
 
 // tracks registered object ids
 #[derive(Default)]
@@ -32,6 +34,8 @@ pub struct State {
   pub device_id: u32,
   pub use_primary: bool,
   pub wanted_mime: Option<MimeType>,
+  pub inferred_mime: Option<MimeType>,
+  pub no_newline: bool,
   pub action: Action,
   // set when a null offer id (cleared/emtpy clipboard) is received, so that a caller like
   // `wl-paste` can differentiate between "nothing was selected" and "still waiting..."
@@ -43,12 +47,20 @@ pub struct State {
   building_mime_len: usize,
 }
 impl State {
-  pub fn init(use_primary: bool, wanted_mime: Option<MimeType>, action: Action) -> Self {
+  pub fn init(
+    use_primary: bool,
+    wanted_mime: Option<MimeType>,
+    inferred_mime: Option<MimeType>,
+    no_newline: bool,
+    action: Action,
+  ) -> Self {
     Self {
       global: Global::default(),
       device_id: 0,
       use_primary,
       wanted_mime,
+      inferred_mime,
+      no_newline,
       action,
       had_empty_selection: false,
       building_id: 0,
@@ -79,6 +91,14 @@ impl State {
     // offer id 0 means empty clipboard or that it was cleared.
     if offer_id == 0 {
       self.had_empty_selection = true;
+      if let Action::PipeToCommand { argv, argc } = &self.action {
+        let devnull =
+          unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
+        if devnull >= 0 {
+          run_with_stdin(devnull, *argv, *argc, c"nil".as_ptr(), core::ptr::null());
+          unsafe { libc::close(devnull) };
+        }
+      }
       return;
     }
 
@@ -97,31 +117,53 @@ impl State {
       unsafe { libc::exit(0) };
     }
 
-    // owned copy, see note in fetch_offer below
-    let mimes = self.building_mimes;
-    let mime_len = self.building_mime_len;
-    let wanted = self.wanted_mime;
-    let Some(mime) = pick_mime(&mimes, mime_len, wanted.as_ref().map(|m| m.as_str())) else {
-      AppError::MimeNotAvailable.write_diagnostic();
+    let mimes = &self.building_mimes[..self.building_mime_len];
+    let classified = classify_offer_types(
+      mimes,
+      self.wanted_mime.as_ref().map(|m| m.as_str()),
+      self.inferred_mime.as_ref().map(|m| m.as_str()),
+    );
+
+    let Some(selected_mime) = mime_type_to_request(
+      &classified,
+      self.wanted_mime.as_ref().map(|m| m.as_str()),
+      self.inferred_mime.as_ref().map(|m| m.as_str()),
+    ) else {
+      if classified.any.is_none() {
+        write_stderr(b"[wl-paste]: nothing is currently copied\n");
+      } else if self.wanted_mime.is_some() {
+        write_stderr(b"[wl-paste]: clipboard content is not available as requested type\n");
+      } else {
+        write_stderr(b"[wl-paste]: clipboard content is not available as inferred output type\n");
+      }
+      if matches!(&self.action, Action::PipeToCommand { .. }) {
+        return;
+      }
       unsafe { libc::exit(1) };
     };
 
-    match fetch_offer(conn, offer_id, &mime) {
-      Ok(read_fd) => {
-        match &self.action {
-          Action::PrintAndExit => {
-            stream_fd_to_stdout(read_fd);
-            unsafe { libc::close(read_fd) };
-            unsafe { libc::exit(0) };
+    match fetch_offer(conn, offer_id, &selected_mime) {
+      Ok(read_fd) => match &self.action {
+        Action::PrintAndExit => {
+          stream_fd_to_stdout(read_fd);
+          if !self.no_newline && is_text_mime(selected_mime.as_str()) {
+            write_stdout(b"\n");
           }
-          Action::PipeToCommand { argv, argc } => {
-            run_with_stdin(read_fd, *argv, *argc);
-            unsafe { libc::close(read_fd) };
-          }
-          // handled above, before fetch_offer is called
-          Action::ListTypes => unreachable!(),
+          unsafe { libc::close(read_fd) };
+          unsafe { libc::exit(0) };
         }
-      }
+        Action::PipeToCommand { argv, argc } => {
+          let state_cstr = if classified.has_sensitive_hint {
+            c"sensitive".as_ptr()
+          } else {
+            c"data".as_ptr()
+          };
+          let type_cstr = selected_mime.as_ptr();
+          run_with_stdin(read_fd, *argv, *argc, state_cstr, type_cstr);
+          unsafe { libc::close(read_fd) };
+        }
+        Action::ListTypes => unreachable!(),
+      },
       Err(e) => e.write_diagnostic(),
     }
   }
@@ -219,9 +261,15 @@ fn stream_fd_to_stdout(read_fd: libc::c_int) {
   }
 }
 
-// fork, wire `read_fd` up as the child's stdin, and exec `argv`. the caller is expected to have set
-// `SIGCHLD` to `SIG_IGN` (like in rustidle) so the kernel reaps the child automatically.
-fn run_with_stdin(read_fd: libc::c_int, argv: *const *mut libc::c_char, argc: usize) {
+// fork, wire `read_fd` up as the child's stdin, set CLIPBOARD_STATE and CLIPBOARD_TYPE, and exec
+// `argv`.
+fn run_with_stdin(
+  read_fd: libc::c_int,
+  argv: *const *mut libc::c_char,
+  argc: usize,
+  state: *const libc::c_char,
+  mime_type: *const libc::c_char,
+) {
   if argc == 0 {
     return;
   }
@@ -235,6 +283,12 @@ fn run_with_stdin(read_fd: libc::c_int, argv: *const *mut libc::c_char, argc: us
       libc::dup2(read_fd, 0);
       // parent's copy of read_fd is no longer needed once the child has its own via dup2.
       libc::close(read_fd);
+      if !state.is_null() {
+        libc::setenv(c"CLIPBOARD_STATE".as_ptr(), state, 1);
+      }
+      if !mime_type.is_null() {
+        libc::setenv(c"CLIPBOARD_TYPE".as_ptr(), mime_type, 1);
+      }
       // `argv` came straight from `main`'s own argv, which the OS guarantees is NUL-terminated at
       // argv[argc]. so, a pointer offset into it is still validly NUL-terminated and this can be
       // handed to execvp directly without rebuilding it.

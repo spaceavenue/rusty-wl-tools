@@ -8,7 +8,7 @@
 // `Connection::recv_with_fd`, and only uses `crawl`/`GlobalHandler` for the registry phase.
 
 use rustclip::error::AppError;
-use rustclip::mime::{MimeType, PREFERRED_TEXT_MIMES};
+use rustclip::mime::{GENERIC_TEXT_OFFERS, MimeType, infer_mime_type_from_fd, is_text_mime};
 use wllib::cli;
 use wllib::dispatch::EventHandler;
 use wllib::error::{SysError, WireError};
@@ -70,10 +70,12 @@ unsafe extern "C" {
 
 const OPTSTRING: *const i8 = c"pont:".as_ptr();
 
-const LONGOPTS: [cli::LongOption; 5] = [
+const LONGOPTS: [cli::LongOption; 7] = [
   cli::LongOption::new(c"use-primary", cli::NO_ARGUMENT, 'p'),
+  cli::LongOption::new(c"primary", cli::NO_ARGUMENT, 'p'),
   cli::LongOption::new(c"paste-once", cli::NO_ARGUMENT, 'o'),
   cli::LongOption::new(c"trim-newline", cli::NO_ARGUMENT, 'n'),
+  cli::LongOption::new(c"foreground", cli::NO_ARGUMENT, 'f'),
   cli::LongOption::new(c"type", cli::REQUIRED_ARGUMENT, 't'),
   cli::LONG_OPTION_TERMINATOR,
 ];
@@ -83,6 +85,7 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
   let mut use_primary = false;
   let mut paste_once = false;
   let mut trim_newline = false;
+  let mut foreground = false;
   let mut wanted_mime: Option<MimeType> = None;
   let mut longindex: libc::c_int = 0;
   unsafe { optind = 1 };
@@ -104,6 +107,7 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
       'p' => use_primary = true,
       'o' => paste_once = true,
       'n' => trim_newline = true,
+      'f' => foreground = true,
       't' if !unsafe { optarg.is_null() } => {
         wanted_mime = Some(MimeType::from(unsafe { core::ffi::CStr::from_ptr(optarg) }));
       }
@@ -112,41 +116,33 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
   }
 
   // Create an anonymous file descriptor in RAM to hold the clipboard data
+  let optind_val = unsafe { optind };
   let memfd = unsafe { libc::memfd_create(c"wl-clip".as_ptr(), libc::MFD_CLOEXEC) };
   if memfd < 0 {
     AppError::Sys(SysError::last("memfd_create")).write_diagnostic();
     unsafe { libc::exit(1) };
   }
-  let optind_val = unsafe { optind };
-  if optind_val < argc as libc::c_int {
-    match write_args_to_fd(memfd, argv, optind_val as usize, argc as usize) {
-      Ok(()) => (),
-      Err(e) => {
-        e.write_diagnostic();
-        unsafe { libc::exit(1) };
-      }
+  let is_stdin = optind_val >= argc as libc::c_int;
+  if is_stdin {
+    if let Err(e) = write_stdin_to_fd(memfd) {
+      e.write_diagnostic();
+      unsafe { libc::exit(1) };
     }
-  } else {
-    match write_stdin_to_fd(memfd) {
-      Ok(()) => (),
-      Err(e) => {
-        e.write_diagnostic();
-        unsafe { libc::exit(1) };
-      }
-    }
+  } else if let Err(e) = write_args_to_fd(memfd, argv, optind_val as usize, argc as usize) {
+    e.write_diagnostic();
+    unsafe { libc::exit(1) };
   }
 
-  if trim_newline {
-    let size = unsafe { libc::lseek(memfd, 0, libc::SEEK_END) };
-    if size > 0 {
-      let mut last_byte = [0u8; 1];
-      unsafe { libc::lseek(memfd, size - 1, libc::SEEK_SET) };
-      if unsafe { libc::read(memfd, last_byte.as_mut_ptr() as _, 1) == 1 } && last_byte[0] == b'\n'
-      {
-        unsafe { libc::ftruncate(memfd, size - 1) };
-      }
-    }
-  }
+  trim_trailing_newline_if_requested(memfd, trim_newline);
+
+  // only stdin content is inferred from — an explicit argument list is already text the user
+  // typed on the command line, and `-t` always takes priority over either.
+  let inferred_mime = if is_stdin && wanted_mime.is_none() {
+    infer_mime_type_from_fd(memfd)
+  } else {
+    None
+  };
+  let fd_to_copy = memfd;
 
   let mut conn = match Connection::connect() {
     Ok(c) => c,
@@ -182,15 +178,25 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
   create_msg.write_u32(source_id);
   conn.send_logged(&create_msg, None);
 
-  if let Some(ref mime) = wanted_mime {
+  let primary_mime: Option<&str> = wanted_mime
+    .as_ref()
+    .map(|m| m.as_str())
+    .or(inferred_mime.as_ref().map(|m| m.as_str()));
+
+  if let Some(m) = primary_mime {
     let mut offer_msg = Message::new(source_id, zwlr_data_control_source_v1::request::OFFER);
-    offer_msg.write_str(mime.as_str());
+    offer_msg.write_str(m);
     conn.send_logged(&offer_msg, None);
-  } else {
-    for pref in PREFERRED_TEXT_MIMES.iter() {
-      let mut offer_msg = Message::new(source_id, zwlr_data_control_source_v1::request::OFFER);
-      offer_msg.write_str(pref);
-      conn.send_logged(&offer_msg, None);
+  }
+  // can unwrap() here since we are already checking if it's None. if that check doesnt pass it is
+  // bound to be Some.
+  if primary_mime.is_none() || is_text_mime(primary_mime.unwrap()) {
+    for &pref in &GENERIC_TEXT_OFFERS {
+      if primary_mime != Some(pref) {
+        let mut offer_msg = Message::new(source_id, zwlr_data_control_source_v1::request::OFFER);
+        offer_msg.write_str(pref);
+        conn.send_logged(&offer_msg, None);
+      }
     }
   }
 
@@ -212,13 +218,14 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
   select_msg.write_u32(source_id);
   conn.send_logged(&select_msg, None);
 
-  // the setup is complete, so we fork, exit and let the child serve selections.
-  let pid = unsafe { libc::fork() };
-  if pid < 0 {
-    write_stderr("[wl-copy]: failed to fork process\n");
-    unsafe { libc::exit(1) };
-  } else if pid > 0 {
-    unsafe { libc::exit(0) };
+  if !foreground {
+    let pid = unsafe { libc::fork() };
+    if pid < 0 {
+      write_stderr("[wl-copy]: failed to fork process\n");
+      unsafe { libc::exit(1) };
+    } else if pid > 0 {
+      unsafe { libc::exit(0) };
+    }
   }
 
   // serve `send`/`cancelled` events on the child's source until someone else takes over the
@@ -242,7 +249,7 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
         match header.opcode {
           zwlr_data_control_source_v1::event::SEND => {
             if let Some(target_fd) = pending_fd.take() {
-              write_content_to_fd(memfd, target_fd);
+              write_content_to_fd(fd_to_copy, target_fd);
               if paste_once {
                 unsafe { libc::exit(0) };
               }
@@ -263,7 +270,7 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
       unsafe { libc::close(unclaimed_fd) };
     }
   }
-  unsafe { libc::close(memfd) };
+  unsafe { libc::close(fd_to_copy) };
   0
 }
 
@@ -320,8 +327,22 @@ fn write_stdin_to_fd(memfd: libc::c_int) -> Result<(), AppError> {
       _ => return Err(AppError::Sys(SysError::last("read"))),
     }
   }
-
   Ok(())
+}
+
+// trims a single trailing '\n' from `fd`'s content in place, if `trim_newline` was requested.
+fn trim_trailing_newline_if_requested(fd: libc::c_int, trim_newline: bool) {
+  if !trim_newline {
+    return;
+  }
+  let size = unsafe { libc::lseek(fd, 0, libc::SEEK_END) };
+  if size > 0 {
+    let mut last_byte = [0u8; 1];
+    unsafe { libc::lseek(fd, size - 1, libc::SEEK_SET) };
+    if unsafe { libc::read(fd, last_byte.as_mut_ptr() as _, 1) == 1 } && last_byte[0] == b'\n' {
+      unsafe { libc::ftruncate(fd, size - 1) };
+    }
+  }
 }
 
 fn write_args_to_fd(

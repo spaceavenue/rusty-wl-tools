@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use rustclip::mime::MimeType;
+use rustclip::mime::{MimeType, infer_mime_type_from_name, path_for_fd};
 use rustclip::state::{Action, State};
 use wllib::cli;
 use wllib::dispatch::dispatch_once;
@@ -19,11 +19,13 @@ unsafe extern "C" {
   static mut optind: libc::c_int;
 }
 
-const OPTSTRING: *const i8 = c"plt:".as_ptr();
+const OPTSTRING: *const i8 = c"plnt:".as_ptr();
 
-const LONGOPTS: [cli::LongOption; 4] = [
+const LONGOPTS: [cli::LongOption; 6] = [
   cli::LongOption::new(c"use-primary", cli::NO_ARGUMENT, 'p'),
+  cli::LongOption::new(c"primary", cli::NO_ARGUMENT, 'p'),
   cli::LongOption::new(c"list-types", cli::NO_ARGUMENT, 'l'),
+  cli::LongOption::new(c"no-newline", cli::NO_ARGUMENT, 'n'),
   cli::LongOption::new(c"type", cli::REQUIRED_ARGUMENT, 't'),
   cli::LONG_OPTION_TERMINATOR,
 ];
@@ -32,6 +34,7 @@ const LONGOPTS: [cli::LongOption; 4] = [
 pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> libc::c_int {
   let mut use_primary = false;
   let mut list_types = false;
+  let mut no_newline = false;
   let mut wanted_mime: Option<MimeType> = None;
   let mut longindex = 0;
   unsafe { optind = 1 };
@@ -52,12 +55,23 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
     match c as u8 as char {
       'p' => use_primary = true,
       'l' => list_types = true,
+      'n' => no_newline = true,
       't' if !unsafe { optarg.is_null() } => {
         wanted_mime = Some(MimeType::from(unsafe { core::ffi::CStr::from_ptr(optarg) }));
       }
       _ => (),
     }
   }
+
+  let inferred_mime = if wanted_mime.is_none() {
+    if let Some(stdout_path) = path_for_fd(1) {
+      infer_mime_type_from_name(stdout_path.as_str())
+    } else {
+      None
+    }
+  } else {
+    None
+  };
 
   let mut conn = match Connection::connect() {
     Ok(c) => c,
@@ -71,7 +85,7 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
   } else {
     Action::PrintAndExit
   };
-  let mut state = State::init(use_primary, wanted_mime, action);
+  let mut state = State::init(use_primary, wanted_mime, inferred_mime, no_newline, action);
 
   if let Err(e) = crawl(&mut conn, &mut state) {
     e.write_diagnostic();

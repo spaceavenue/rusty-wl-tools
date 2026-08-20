@@ -21,8 +21,9 @@ unsafe extern "C" {
 
 const OPTSTRING: *const i8 = c"pt:".as_ptr();
 
-const LONGOPTS: [cli::LongOption; 3] = [
+const LONGOPTS: [cli::LongOption; 4] = [
   cli::LongOption::new(c"use-primary", cli::NO_ARGUMENT, 'p'),
+  cli::LongOption::new(c"primary", cli::NO_ARGUMENT, 'p'),
   cli::LongOption::new(c"type", cli::REQUIRED_ARGUMENT, 't'),
   cli::LONG_OPTION_TERMINATOR,
 ];
@@ -77,7 +78,7 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
     argv: command_argv,
     argc: command_argc,
   };
-  let mut state = State::init(use_primary, wanted_mime, action);
+  let mut state = State::init(use_primary, wanted_mime, None, false, action);
 
   if let Err(e) = crawl(&mut conn, &mut state) {
     e.write_diagnostic();
