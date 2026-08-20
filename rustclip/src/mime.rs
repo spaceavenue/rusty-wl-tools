@@ -6,9 +6,11 @@
 // `[u8; MAX_MIME_LEN]` per entry because no allocator.
 //
 // Mime inference has two independent halves:
-// - Content-based (wl-copy, reading stdin): magic-byte sniffing first (`sniff_mime`), then
-//   `xdg-mime query filetype` as a fallback, pointed at `/proc/self/fd/<n>` of the memfd holding
-//   the content. xdg-mime just needs a path it can `stat`/`open`, and a procfs fd entry is one.
+// - Content-based (wl-copy, reading stdin): magic-byte sniffing (`sniff_mime`, cheap and
+//   in-process) first, then `file --mime-type -` as a fallback, with the memfd's content piped
+//   directly into its stdin — no path/procfs involved, so there's nothing to resolve or trust
+//   beyond the subprocess's own stdout (which is still validated for `type/subtype` shape before
+//   being trusted, since `file` can print an error message to stdout with exit status 0).
 // - Name-based (wl-paste, writing to a redirected file): a small built-in extension table, not a
 //   port of the freedesktop shared-mime-info glob database — see `EXTENSION_MIME_TABLE`.
 //
@@ -79,6 +81,18 @@ pub fn sniff_mime(buf: &[u8]) -> Option<&'static str> {
   let trimmed = buf.trim_ascii_start();
   if trimmed.starts_with(b"<?xml") || trimmed.starts_with(b"<svg") {
     return Some("image/svg+xml");
+  }
+  // BMP: BM
+  if buf.len() >= 2 && &buf[..2] == b"BM" {
+    return Some("image/bmp");
+  }
+  // TIFF: little-endian "II*\0" or big-endian "MM\0*"
+  if buf.len() >= 4 && (&buf[..4] == b"II*\0" || &buf[..4] == b"MM\0*") {
+    return Some("image/tiff");
+  }
+  // ICO: \0\0\x01\0
+  if buf.len() >= 4 && &buf[..4] == b"\x00\x00\x01\x00" {
+    return Some("image/x-icon");
   }
   None
 }
@@ -158,9 +172,9 @@ pub fn infer_from_name(file_path: &str) -> Option<MimeType> {
     .map(|(_, mime)| MimeType::from(*mime))
 }
 
-/// Infer a MIME type for an open fd's content: magic-byte sniffing first, then `xdg-mime query
-/// filetype` against the fd's own `/proc/self/fd` entry as a fallback for content sniffing doesn't
-/// recognize.
+/// Infer a MIME type for an open fd's content: magic-byte sniffing first (cheap, in-process, no
+/// fork), then `file --mime-type -` fed the content directly over stdin as a fallback for
+/// whatever content sniffing doesn't recognize.
 #[must_use]
 pub fn infer_from_fd(fd: libc::c_int) -> Option<MimeType> {
   let mut header = [0u8; 64];
@@ -172,10 +186,13 @@ pub fn infer_from_fd(fd: libc::c_int) -> Option<MimeType> {
   {
     return Some(MimeType::from(sniffed));
   }
-  query_xdg_mime_for_fd(fd)
+  query_file_for_fd(fd)
 }
 
-fn query_xdg_mime_for_fd(fd: libc::c_int) -> Option<MimeType> {
+/// Fork+exec `file --mime-type -`, feeding it `fd`'s content over its stdin and reading the
+/// mime type back over a pipe on its stdout. `fd` is expected to be rewound to the start.
+fn query_file_for_fd(fd: libc::c_int) -> Option<MimeType> {
+  // this pipe carries `file`'s stdout (the mime type string) back to us.
   let mut pipe_fds = [0i32; 2];
   if unsafe { libc::pipe2(pipe_fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
     return None;
@@ -192,44 +209,45 @@ fn query_xdg_mime_for_fd(fd: libc::c_int) -> Option<MimeType> {
 
   if pid == 0 {
     unsafe {
-      libc::dup2(pipe_fds[1], 1);
+      // close child's read end of the pipe.
       libc::close(pipe_fds[0]);
+      // route fd to stdin, write end to stdout of child process, then close child's write end.
+      libc::dup2(fd, 0);
+      libc::dup2(pipe_fds[1], 1);
       libc::close(pipe_fds[1]);
-
-      let devnull = libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY);
-      if devnull >= 0 {
-        libc::dup2(devnull, 0);
-        libc::close(devnull);
-      } else {
-        libc::close(0);
-      }
-
+      // undo the fork-inherited SIG_IGN the parent may have set for these.`file` should see default
+      // signal disposition, not silently swallow a `SIGPIPE` from its own stdout pipe closing
+      // early.
       libc::signal(libc::SIGHUP, libc::SIG_DFL);
       libc::signal(libc::SIGPIPE, libc::SIG_DFL);
 
-      // clear FD_CLOEXEC on this process's own copy of `fd` so it survives the exec below and
-      // `/proc/self/fd/<fd>` still resolves inside the exec'd xdg-mime process.
-      libc::fcntl(fd, libc::F_SETFD, 0);
+      // pipe stderr to /dev/nill.
+      let devnull = libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY);
+      if devnull >= 0 {
+        libc::dup2(devnull, 2);
+        libc::close(devnull);
+      }
 
-      // must be the literal `/proc/self/fd/<n>` path, not `path_for_fd`'s readlink target — for a
-      // memfd, readlink resolves to the cosmetic, non-openable "/memfd:name (deleted)" name.
-      let mut path = StringOnStack::<40>::new();
-      path.push_str("/proc/self/fd/").push_i32(fd);
-
-      libc::execlp(
-        c"xdg-mime".as_ptr(),
-        c"xdg-mime".as_ptr(),
-        c"query".as_ptr(),
-        c"filetype".as_ptr(),
-        path.as_ptr(),
-        core::ptr::null::<libc::c_char>(),
-      );
+      let argv: [*const libc::c_char; 5] = [
+        c"file".as_ptr(),
+        // drop leading "-: "
+        c"-b".as_ptr(),
+        // print type/subtype. -i/--mine print '; charset=...' as well. see shape check below for
+        // why this matters.
+        c"--mime-type".as_ptr(),
+        c"-".as_ptr(),
+        core::ptr::null(),
+      ];
+      libc::execvp(argv[0], argv.as_ptr());
+      // only reached if execvp() fails. let waitpid below handle it.
       libc::_exit(1);
     }
   }
 
+  // close parent's write end of the pipe so that the EOF arrives to the read end below.
   unsafe { libc::close(pipe_fds[1]) };
 
+  // this specific child needs an actual `waitpid` so its exit status can be checked below.
   let mut wstatus = 0;
   unsafe { libc::waitpid(pid, &raw mut wstatus, 0) };
   if !libc::WIFEXITED(wstatus) || libc::WEXITSTATUS(wstatus) != 0 {
@@ -260,13 +278,10 @@ fn query_xdg_mime_for_fd(fd: libc::c_int) -> Option<MimeType> {
     },
   };
 
-  // `file`/`xdg-mime` sometimes print a failure message to stdout instead of stderr (e.g. `file`
-  // printing "cannot open `...' (No such file or directory)" with exit status 0 when given a path
-  // it can't actually stat, which happens for every memfd since `xdg-mime` resolves
-  // `/proc/self/fd/<n>` to the memfd's cosmetic, non-openable "/memfd:name (deleted)" name — a
-  // string that itself contains slashes, so a bare `contains('/')` check isn't enough to reject
-  // it). A real mime type is exactly `type/subtype` with no whitespace and non-empty halves, so
-  // require that shape instead of trusting exit status alone.
+  // `file` sometimes prints a failure message to stdout instead of stderr (e.g. `file` printing
+  // "cannot open `...' (No such file or directory)" with exit status 0. a real mime type is exactly
+  // `type/subtype` with no whitespace and non-empty halves, so require that shape instead of
+  // trusting exit status alone.
   let looks_like_mime = !trimmed.contains(char::is_whitespace)
     && match trimmed.split_once('/') {
       Some((ty, subty)) => !ty.is_empty() && !subty.is_empty() && !subty.contains('/'),
