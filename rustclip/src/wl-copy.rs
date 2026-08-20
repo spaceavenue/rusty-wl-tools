@@ -8,17 +8,17 @@
 // `Connection::recv_with_fd`, and only uses `crawl`/`GlobalHandler` for the registry phase.
 
 use rustclip::error::AppError;
-use rustclip::mime::{GENERIC_TEXT_OFFERS, MimeType, infer_mime_type_from_fd, is_text_mime};
-use wllib::cli;
+use rustclip::mime::{self, GENERIC_TEXT_OFFERS, MimeType};
 use wllib::dispatch::EventHandler;
 use wllib::error::{SysError, WireError};
-use wllib::fmt_lite::write_stderr;
+use wllib::fmt_lite::{StringOnStack, write_stderr};
 use wllib::protocols::{
   zwlr_data_control_device_v1, zwlr_data_control_manager_v1, zwlr_data_control_source_v1,
 };
 use wllib::registry::{GlobalHandler, bind, clamp_version, crawl};
 use wllib::transport::Connection;
 use wllib::wire::{Message, parse_header};
+use wllib::{cli, fmt_lite};
 
 #[derive(Default)]
 struct Global {
@@ -68,10 +68,9 @@ unsafe extern "C" {
   static mut optind: libc::c_int;
 }
 
-const OPTSTRING: *const i8 = c"pont:".as_ptr();
+const OPTSTRING: *const i8 = c"pont:f".as_ptr();
 
-const LONGOPTS: [cli::LongOption; 7] = [
-  cli::LongOption::new(c"use-primary", cli::NO_ARGUMENT, 'p'),
+const LONGOPTS: [cli::LongOption; 6] = [
   cli::LongOption::new(c"primary", cli::NO_ARGUMENT, 'p'),
   cli::LongOption::new(c"paste-once", cli::NO_ARGUMENT, 'o'),
   cli::LongOption::new(c"trim-newline", cli::NO_ARGUMENT, 'n'),
@@ -97,7 +96,7 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
         argv,
         OPTSTRING,
         LONGOPTS.as_ptr(),
-        &mut longindex,
+        &raw mut longindex,
       )
     };
     if c == -1 {
@@ -128,17 +127,17 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
       e.write_diagnostic();
       unsafe { libc::exit(1) };
     }
-  } else if let Err(e) = write_args_to_fd(memfd, argv, optind_val as usize, argc as usize) {
+  } else if let Err(e) = write_args_to_fd(memfd, argv, optind_val as usize, argc.cast_unsigned()) {
     e.write_diagnostic();
     unsafe { libc::exit(1) };
   }
 
-  trim_trailing_newline_if_requested(memfd, trim_newline);
+  trim_newline.then(|| trim_trailing_newline(memfd));
 
   // only stdin content is inferred from — an explicit argument list is already text the user
   // typed on the command line, and `-t` always takes priority over either.
   let inferred_mime = if is_stdin && wanted_mime.is_none() {
-    infer_mime_type_from_fd(memfd)
+    mime::infer_from_fd(memfd)
   } else {
     None
   };
@@ -159,6 +158,7 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
     e.write_diagnostic();
     unsafe { libc::exit(1) };
   }
+
   if state.global.manager_id == 0 {
     write_stderr("[wl-copy]: compositor does not support wlr-data-control\n");
     unsafe { libc::exit(1) };
@@ -180,8 +180,8 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
 
   let primary_mime: Option<&str> = wanted_mime
     .as_ref()
-    .map(|m| m.as_str())
-    .or(inferred_mime.as_ref().map(|m| m.as_str()));
+    .map(StringOnStack::as_str)
+    .or(inferred_mime.as_ref().map(StringOnStack::as_str));
 
   if let Some(m) = primary_mime {
     let mut offer_msg = Message::new(source_id, zwlr_data_control_source_v1::request::OFFER);
@@ -190,7 +190,7 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
   }
   // can unwrap() here since we are already checking if it's None. if that check doesnt pass it is
   // bound to be Some.
-  if primary_mime.is_none() || is_text_mime(primary_mime.unwrap()) {
+  if primary_mime.is_none() || mime::is_text_mime(primary_mime.unwrap()) {
     for &pref in &GENERIC_TEXT_OFFERS {
       if primary_mime != Some(pref) {
         let mut offer_msg = Message::new(source_id, zwlr_data_control_source_v1::request::OFFER);
@@ -249,7 +249,7 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
         match header.opcode {
           zwlr_data_control_source_v1::event::SEND => {
             if let Some(target_fd) = pending_fd.take() {
-              write_content_to_fd(fd_to_copy, target_fd);
+              let _ = write_content_to_fd(fd_to_copy, target_fd, true);
               if paste_once {
                 unsafe { libc::exit(0) };
               }
@@ -274,109 +274,64 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
   0
 }
 
-fn write_content_to_fd(source_fd: libc::c_int, target_fd: libc::c_int) {
-  // reset the file offset of the memfd to the beginning before copying
-  unsafe { libc::lseek(source_fd, 0, libc::SEEK_SET) };
-  let mut buf = [0u8; 4096];
-  loop {
-    let r = unsafe { libc::read(source_fd, buf.as_mut_ptr() as _, buf.len()) };
-    if r <= 0 {
-      break;
-    }
-    let mut written = 0;
-    while written < r {
-      let w = unsafe {
-        libc::write(
-          target_fd,
-          buf.as_ptr().add(written as _) as _,
-          (r - written) as _,
-        )
-      };
-      if w <= 0 {
-        break;
-      }
-      written += w;
-    }
-  }
-  unsafe { libc::close(target_fd) };
-}
-
-fn write_stdin_to_fd(memfd: libc::c_int) -> Result<(), AppError> {
-  let mut chunk = [0u8; 4096];
-  loop {
-    let n = unsafe { libc::read(0, chunk.as_mut_ptr() as *mut _, chunk.len()) };
-    match n {
-      n if n > 0 => {
-        let mut written = 0;
-        while written < n {
-          let w = unsafe {
-            libc::write(
-              memfd,
-              chunk.as_ptr().add(written as _) as _,
-              (n - written) as _,
-            )
-          };
-          match w {
-            w if w > 0 => written += w,
-            0 => break,
-            _ => return Err(AppError::Sys(SysError::last("write"))),
-          }
-        }
-      }
-      0 => break,
-      _ => return Err(AppError::Sys(SysError::last("read"))),
-    }
-  }
-  Ok(())
-}
-
-// trims a single trailing '\n' from `fd`'s content in place, if `trim_newline` was requested.
-fn trim_trailing_newline_if_requested(fd: libc::c_int, trim_newline: bool) {
-  if !trim_newline {
-    return;
-  }
+/// trims a single trailing '\n' in the given fd.
+fn trim_trailing_newline(fd: libc::c_int) {
   let size = unsafe { libc::lseek(fd, 0, libc::SEEK_END) };
   if size > 0 {
     let mut last_byte = [0u8; 1];
     unsafe { libc::lseek(fd, size - 1, libc::SEEK_SET) };
-    if unsafe { libc::read(fd, last_byte.as_mut_ptr() as _, 1) == 1 } && last_byte[0] == b'\n' {
+    if unsafe { libc::read(fd, last_byte.as_mut_ptr().cast(), 1) == 1 } && last_byte[0] == b'\n' {
       unsafe { libc::ftruncate(fd, size - 1) };
     }
   }
 }
 
+/// writes data from `source_fd` to `target_fd`
+fn write_content_to_fd(
+  source_fd: libc::c_int,
+  target_fd: libc::c_int,
+  close: bool,
+) -> Result<(), AppError> {
+  // if not stdin, reset the file offset of the fd to the beginning before copying.
+  if source_fd != 0 {
+    unsafe { libc::lseek(source_fd, 0, libc::SEEK_SET) };
+  }
+  let mut chunk = [0u8; 4096];
+  loop {
+    let n = unsafe { libc::read(source_fd, chunk.as_mut_ptr().cast(), chunk.len()) };
+    match n {
+      n if n > 0 => {
+        fmt_lite::write_fd(target_fd, &chunk[..n as usize], None).map_err(AppError::Sys)?;
+      }
+      0 => break,
+      _ => return Err(AppError::Sys(SysError::last("read"))),
+    }
+  }
+  if close {
+    unsafe { libc::close(target_fd) };
+  }
+  Ok(())
+}
+
+/// writes whatever was received from stdin to the given fd
+fn write_stdin_to_fd(fd: libc::c_int) -> Result<(), AppError> {
+  write_content_to_fd(0, fd, false)
+}
+
+/// writes argv to the given fd
 fn write_args_to_fd(
-  memfd: libc::c_int,
+  fd: libc::c_int,
   argv: *const *mut libc::c_char,
   start: usize,
   argc: usize,
 ) -> Result<(), AppError> {
   for i in start..argc {
     if i > start {
-      let w = unsafe { libc::write(memfd, b" ".as_ptr() as _, 1) };
-      match w {
-        w if w > 0 => (),
-        0 => break,
-        _ => return Err(AppError::Sys(SysError::last("write"))),
-      }
+      fmt_lite::write_fd(fd, b" ", Some(1)).map_err(AppError::Sys)?;
     }
     let arg = unsafe { *argv.add(i) };
     let bytes = unsafe { core::ffi::CStr::from_ptr(arg) }.to_bytes();
-    let mut written = 0;
-    while written < bytes.len() {
-      let w = unsafe {
-        libc::write(
-          memfd,
-          bytes.as_ptr().add(written as _) as _,
-          (bytes.len() - written) as _,
-        )
-      };
-      match w {
-        w if w > 0 => written += w as usize,
-        0 => break,
-        _ => return Err(AppError::Sys(SysError::last("write"))),
-      }
-    }
+    fmt_lite::write_fd(fd, bytes, None).map_err(AppError::Sys)?;
   }
   Ok(())
 }

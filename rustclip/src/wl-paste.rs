@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use rustclip::mime::{MimeType, infer_mime_type_from_name, path_for_fd};
+use rustclip::mime::{self, MimeType};
 use rustclip::state::{Action, State};
 use wllib::cli;
 use wllib::dispatch::dispatch_once;
@@ -46,7 +46,7 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
         argv,
         OPTSTRING,
         LONGOPTS.as_ptr(),
-        &mut longindex,
+        &raw mut longindex,
       )
     };
     if c == -1 {
@@ -64,8 +64,8 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
   }
 
   let inferred_mime = if wanted_mime.is_none() {
-    if let Some(stdout_path) = path_for_fd(1) {
-      infer_mime_type_from_name(stdout_path.as_str())
+    if let Some(stdout_path) = mime::path_for_fd(1) {
+      mime::infer_from_name(stdout_path.as_str())
     } else {
       None
     }

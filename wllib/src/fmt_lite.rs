@@ -1,10 +1,12 @@
-//! Formatting methods due to absence of core::fmt and heap allocations.
+//! Formatting methods due to absence of `core::fmt` and heap allocations.
 //! There are also convenience methods, such as for writing to file descriptors, and methods for
 //! writing to stderr and stdout.
 
 use core::ffi::CStr;
 
-/// Lightweight formatter trait in absence of core::fmt.
+use crate::error::SysError;
+
+/// Lightweight formatter trait in absence of `core::fmt`.
 pub trait FmtLite {
   fn format_into<const N: usize>(self, buf: &mut StringOnStack<N>);
 }
@@ -65,6 +67,7 @@ pub struct StringOnStack<const N: usize> {
 }
 impl<const N: usize> StringOnStack<N> {
   /// Create an empty string.
+  #[must_use]
   pub const fn new() -> Self {
     Self {
       buf: [0; N],
@@ -73,21 +76,25 @@ impl<const N: usize> StringOnStack<N> {
   }
 
   /// Returns the stored string as bytes.
+  #[must_use]
   pub const fn capacity(&self) -> usize {
     N.saturating_sub(1)
   }
 
   /// Returns remaining capacity in bytes.
+  #[must_use]
   pub const fn remaining_capacity(&self) -> usize {
     self.capacity().saturating_sub(self.len)
   }
 
   /// Current length in bytes.
+  #[must_use]
   pub const fn len(&self) -> usize {
     self.len
   }
 
   /// Returns true if empty.
+  #[must_use]
   pub const fn is_empty(&self) -> bool {
     self.len == 0
   }
@@ -101,11 +108,13 @@ impl<const N: usize> StringOnStack<N> {
   }
 
   /// View as byte slice.
+  #[must_use]
   pub fn as_bytes(&self) -> &[u8] {
     &self.buf[..self.len]
   }
 
   /// View as a string slice.
+  #[must_use]
   pub fn as_str(&self) -> &str {
     // SAFETY: All push methods enforce UTF-8 validity.
     unsafe { str::from_utf8_unchecked(&self.buf[..self.len]) }
@@ -119,11 +128,13 @@ impl<const N: usize> StringOnStack<N> {
 
   /// Return a raw pointer to the C string representation.
   /// Guaranteed to be NUL-terminated at all times.
+  #[must_use]
   pub fn as_ptr(&self) -> *const libc::c_char {
-    self.buf.as_ptr() as *const libc::c_char
+    self.buf.as_ptr().cast::<libc::c_char>()
   }
 
-  /// View as a borrowed CStr. Always safe and O(1) due to the trailing NUL invariant.
+  /// View as a borrowed `CStr`. Always safe and O(1) due to the trailing NUL invariant.
+  #[must_use]
   pub fn as_c_str(&self) -> &CStr {
     if N == 0 {
       c""
@@ -219,12 +230,12 @@ impl<const N: usize> StringOnStack<N> {
 
   /// Push an unsigned 32-bit integer formatted in base 10.
   pub fn push_u32(&mut self, num: u32) -> &mut Self {
-    self.push_u64(num as u64)
+    self.push_u64(u64::from(num))
   }
 
   /// Push a signed 32-bit integer formatted in base 10.
   pub fn push_i32(&mut self, num: i32) -> &mut Self {
-    self.push_i64(num as i64)
+    self.push_i64(i64::from(num))
   }
 
   /// Push anything that implements `FmtLite` (currently: &str, char, u32, i32)
@@ -281,20 +292,31 @@ impl<const N: usize> From<&CStr> for StringOnStack<N> {
 }
 
 /// Writes the buffer to the file descriptor.
-pub fn write_fd(fd: libc::c_int, msg: impl AsRef<[u8]>) -> Result<(), crate::error::SysError> {
-  let mut msg = msg.as_ref();
+pub fn write_fd(
+  fd: libc::c_int,
+  msg: impl AsRef<[u8]>,
+  count: Option<usize>,
+) -> Result<(), SysError> {
+  let msg = msg.as_ref();
+  let len = match count {
+    Some(c) => c.clamp(1, msg.len()),
+    None => msg.len(),
+  };
+  let mut msg = &msg[..len];
   while !msg.is_empty() {
-    let res = unsafe { libc::write(fd, msg.as_ptr() as *const libc::c_void, msg.len()) };
-    if res > 0 {
-      msg = &msg[res as usize..];
-    } else if res < 0 {
-      let err = crate::error::SysError::last("write");
-      if err.errno == libc::EINTR {
-        continue;
+    let res = unsafe { libc::write(fd, msg.as_ptr().cast::<libc::c_void>(), msg.len()) };
+    match res {
+      0 => break,
+      res if res > 0 => {
+        msg = &msg[res as usize..];
       }
-      return Err(err);
-    } else {
-      break;
+      _ => {
+        let err = SysError::last("write");
+        if err.errno == libc::EINTR {
+          continue;
+        }
+        return Err(err);
+      }
     }
   }
   Ok(())
@@ -302,10 +324,10 @@ pub fn write_fd(fd: libc::c_int, msg: impl AsRef<[u8]>) -> Result<(), crate::err
 
 /// Writes the buffer to stderr.
 pub fn write_stderr(msg: impl AsRef<[u8]>) {
-  let _ = write_fd(2, msg);
+  let _ = write_fd(2, msg, None);
 }
 
 /// Writes the buffer to stdout.
 pub fn write_stdout(msg: impl AsRef<[u8]>) {
-  let _ = write_fd(1, msg);
+  let _ = write_fd(1, msg, None);
 }

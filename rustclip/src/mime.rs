@@ -90,7 +90,7 @@ pub fn path_for_fd(fd: libc::c_int) -> Option<StringOnStack<256>> {
   let n = unsafe {
     libc::readlink(
       proc_path.as_ptr(),
-      buf.as_mut_ptr() as *mut libc::c_char,
+      buf.as_mut_ptr().cast::<libc::c_char>(),
       buf.len() - 1,
     )
   };
@@ -138,7 +138,8 @@ const EXTENSION_MIME_TABLE: &[(&str, &str)] = &[
 
 /// Infer a MIME type from a file path's extension via `EXTENSION_MIME_TABLE`. Returns `None` for
 /// extensions it doesn't recognize.
-pub fn infer_mime_type_from_name(file_path: &str) -> Option<MimeType> {
+#[must_use]
+pub fn infer_from_name(file_path: &str) -> Option<MimeType> {
   let filename = match file_path.rfind('/') {
     Some(idx) => &file_path[idx + 1..],
     None => file_path,
@@ -157,10 +158,11 @@ pub fn infer_mime_type_from_name(file_path: &str) -> Option<MimeType> {
 /// Infer a MIME type for an open fd's content: magic-byte sniffing first, then `xdg-mime query
 /// filetype` against the fd's own `/proc/self/fd` entry as a fallback for content sniffing doesn't
 /// recognize.
-pub fn infer_mime_type_from_fd(fd: libc::c_int) -> Option<MimeType> {
+#[must_use]
+pub fn infer_from_fd(fd: libc::c_int) -> Option<MimeType> {
   let mut header = [0u8; 64];
   unsafe { libc::lseek(fd, 0, libc::SEEK_SET) };
-  let n = unsafe { libc::read(fd, header.as_mut_ptr() as *mut _, header.len()) };
+  let n = unsafe { libc::read(fd, header.as_mut_ptr().cast(), header.len()) };
   unsafe { libc::lseek(fd, 0, libc::SEEK_SET) };
   if n > 0
     && let Some(sniffed) = sniff_mime(&header[..n as usize])
@@ -205,6 +207,9 @@ fn query_xdg_mime_for_fd(fd: libc::c_int) -> Option<MimeType> {
       // clear FD_CLOEXEC on this process's own copy of `fd` so it survives the exec below and
       // `/proc/self/fd/<fd>` still resolves inside the exec'd xdg-mime process.
       libc::fcntl(fd, libc::F_SETFD, 0);
+
+      // must be the literal `/proc/self/fd/<n>` path, not `path_for_fd`'s readlink target — for a
+      // memfd, readlink resolves to the cosmetic, non-openable "/memfd:name (deleted)" name.
       let mut path = StringOnStack::<40>::new();
       path.push_str("/proc/self/fd/").push_i32(fd);
 
@@ -223,7 +228,7 @@ fn query_xdg_mime_for_fd(fd: libc::c_int) -> Option<MimeType> {
   unsafe { libc::close(pipe_fds[1]) };
 
   let mut wstatus = 0;
-  unsafe { libc::waitpid(pid, &mut wstatus, 0) };
+  unsafe { libc::waitpid(pid, &raw mut wstatus, 0) };
   if !libc::WIFEXITED(wstatus) || libc::WEXITSTATUS(wstatus) != 0 {
     unsafe { libc::close(pipe_fds[0]) };
     return None;
@@ -233,7 +238,7 @@ fn query_xdg_mime_for_fd(fd: libc::c_int) -> Option<MimeType> {
   let n = unsafe {
     libc::read(
       pipe_fds[0],
-      buf.as_mut_ptr() as *mut libc::c_void,
+      buf.as_mut_ptr().cast::<libc::c_void>(),
       buf.len(),
     )
   };
@@ -284,6 +289,7 @@ pub struct ClassifiedTypes {
 }
 
 /// Classify offer types.
+#[must_use]
 pub fn classify_offer_types(
   available: &[MimeType],
   wanted_explicit: Option<&str>,
@@ -325,6 +331,7 @@ pub fn classify_offer_types(
 }
 
 /// Select the best matching MIME type to request.
+#[must_use]
 pub fn mime_type_to_request(
   types: &ClassifiedTypes,
   wanted_explicit: Option<&str>,

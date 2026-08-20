@@ -47,6 +47,7 @@ pub struct State {
   building_mime_len: usize,
 }
 impl State {
+  #[must_use]
   pub fn init(
     use_primary: bool,
     wanted_mime: Option<MimeType>,
@@ -120,14 +121,14 @@ impl State {
     let mimes = &self.building_mimes[..self.building_mime_len];
     let classified = classify_offer_types(
       mimes,
-      self.wanted_mime.as_ref().map(|m| m.as_str()),
-      self.inferred_mime.as_ref().map(|m| m.as_str()),
+      self.wanted_mime.as_ref().map(wllib::fmt_lite::StringOnStack::as_str),
+      self.inferred_mime.as_ref().map(wllib::fmt_lite::StringOnStack::as_str),
     );
 
     let Some(selected_mime) = mime_type_to_request(
       &classified,
-      self.wanted_mime.as_ref().map(|m| m.as_str()),
-      self.inferred_mime.as_ref().map(|m| m.as_str()),
+      self.wanted_mime.as_ref().map(wllib::fmt_lite::StringOnStack::as_str),
+      self.inferred_mime.as_ref().map(wllib::fmt_lite::StringOnStack::as_str),
     ) else {
       if classified.any.is_none() {
         write_stderr(b"[wl-paste]: nothing is currently copied\n");
@@ -240,23 +241,12 @@ fn fetch_offer(
 fn stream_fd_to_stdout(read_fd: libc::c_int) {
   let mut buf = [0u8; 8192];
   loop {
-    let n = unsafe { libc::read(read_fd, buf.as_mut_ptr() as *mut _, buf.len()) };
+    let n = unsafe { libc::read(read_fd, buf.as_mut_ptr().cast(), buf.len()) };
     if n <= 0 {
       break;
     }
-    let mut written = 0usize;
-    while written < n as usize {
-      let w = unsafe {
-        libc::write(
-          1,
-          buf[written..n as usize].as_ptr() as *const _,
-          n as usize - written,
-        )
-      };
-      if w <= 0 {
-        break;
-      }
-      written += w as usize;
+    if wllib::fmt_lite::write_fd(1, &buf[..n as usize], None).is_err() {
+      break;
     }
   }
 }
@@ -292,7 +282,7 @@ fn run_with_stdin(
       // `argv` came straight from `main`'s own argv, which the OS guarantees is NUL-terminated at
       // argv[argc]. so, a pointer offset into it is still validly NUL-terminated and this can be
       // handed to execvp directly without rebuilding it.
-      libc::execvp(*argv as _, argv as _);
+      libc::execvp((*argv).cast_const(), argv.cast());
       // only reached if exec itself failed
       libc::_exit(1);
     }

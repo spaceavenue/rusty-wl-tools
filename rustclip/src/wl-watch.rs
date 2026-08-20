@@ -42,7 +42,7 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
         argv,
         OPTSTRING,
         LONGOPTS.as_ptr(),
-        &mut longindex,
+        &raw mut longindex,
       )
     };
     if c == -1 {

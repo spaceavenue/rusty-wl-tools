@@ -17,7 +17,7 @@ impl AppError {
       AppError::Sys(e) => WireError::Sys(*e).write_diagnostic(),
       AppError::NothingCopied => write_stderr(b"rustclip: nothing is currently copied\n"),
       AppError::MimeNotAvailable => {
-        write_stderr(b"rustclip: requested mime type not offered by the current selection\n")
+        write_stderr("rustclip: requested mime type not offered by the current selection\n");
       }
     }
   }
