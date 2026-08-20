@@ -33,6 +33,7 @@ pub const GENERIC_TEXT_OFFERS: [&str; 5] = [
 ];
 
 /// A heuristic to detect if a MIME type is plain text or text-compatible.
+#[must_use]
 pub fn is_text_mime(mime: &str) -> bool {
   // Types that explicitly declare they're textual
   mime.starts_with("text/")
@@ -52,6 +53,7 @@ pub fn is_text_mime(mime: &str) -> bool {
 }
 
 /// Infer common MIME types from the initial bytes (magic numbers) of the data.
+#[must_use]
 pub fn sniff_mime(buf: &[u8]) -> Option<&'static str> {
   // PNG: \x89PNG\r\n\x1a\n
   if buf.len() >= 8 && &buf[..8] == b"\x89PNG\r\n\x1a\n" {
@@ -82,6 +84,7 @@ pub fn sniff_mime(buf: &[u8]) -> Option<&'static str> {
 }
 
 /// Return the path of the file linked to a file descriptor.
+#[must_use]
 pub fn path_for_fd(fd: libc::c_int) -> Option<StringOnStack<256>> {
   let mut proc_path = StringOnStack::<64>::new();
   proc_path.push_str("/proc/self/fd/").push_i32(fd);

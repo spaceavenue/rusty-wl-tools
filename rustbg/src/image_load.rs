@@ -59,7 +59,7 @@ fn exec_and_read<const N: usize>(
       if remaining == 0 {
         break;
       }
-      let num_bytes = libc::read(pipe[0], buffer.as_mut_ptr().add(offset) as _, remaining);
+      let num_bytes = libc::read(pipe[0], buffer.as_mut_ptr().add(offset).cast(), remaining);
       match num_bytes {
         num_bytes if num_bytes > 0 => {
           offset += num_bytes as usize;
@@ -160,9 +160,9 @@ fn run_dump_bgra(
   // build dump-bgra argument vector: scale image to raw bgra pixels and stream to stdout
   let argv: [*const libc::c_char; 7] = [
     c"dump-bgra".as_ptr(),
-    w_str.as_ptr() as _,
-    h_str.as_ptr() as _,
-    mode_str.as_ptr() as _,
+    w_str.as_ptr().cast(),
+    h_str.as_ptr().cast(),
+    mode_str.as_ptr().cast(),
     path,
     c"-".as_ptr(),
     core::ptr::null(),

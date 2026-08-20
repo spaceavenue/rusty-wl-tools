@@ -47,8 +47,8 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
     sa.sa_sigaction = handle_sigusr1 as *const () as libc::sighandler_t;
     // sa_flags = 0 so that blocking syscalls (recv, etc.) fail with EINTR instead of restarting
     sa.sa_flags = 0;
-    libc::sigemptyset(&mut sa.sa_mask);
-    libc::sigaction(libc::SIGUSR1, &sa, core::ptr::null_mut());
+    libc::sigemptyset(&raw mut sa.sa_mask);
+    libc::sigaction(libc::SIGUSR1, &raw const sa, core::ptr::null_mut());
   }
 
   let mut conn = match Connection::connect() {
@@ -112,7 +112,7 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
     }
 
     match dispatch_once(&mut conn, &mut state) {
-      Ok(_) => (),
+      Ok(()) => (),
       Err(ConnectionClosed) => break,
       Err(e) => {
         if IS_SUSPENDED.load(core::sync::atomic::Ordering::Relaxed) {

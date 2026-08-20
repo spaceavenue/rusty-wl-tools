@@ -26,6 +26,7 @@ pub struct State {
   pub notifications: [Notification; MAX_ENTRIES],
 }
 impl State {
+  #[must_use]
   pub fn init(config: Config) -> Self {
     let mut notifications = core::array::from_fn(|_| Notification::default());
     (0..config.entry_len).for_each(|i| notifications[i].entry = config.entries[i]);
@@ -65,14 +66,14 @@ impl GlobalHandler for State {
 }
 impl EventHandler for State {
   fn handle_event(&mut self, _conn: &mut Connection, sender: u32, opcode: u16, _data: &[u8]) {
-    for notif in self.notifications.iter() {
+    for notif in &self.notifications {
       if notif.id != sender {
         continue;
       }
       match opcode {
         ext_idle_notification_v1::event::IDLED => {
           if let Some(argv) = notif.entry.idle_argv {
-            self.config.spawn(argv)
+            self.config.spawn(argv);
           }
           return;
         }

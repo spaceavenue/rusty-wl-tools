@@ -196,7 +196,7 @@ impl<const N: usize> StringOnStack<N> {
     self.push_str(s)
   }
 
-  /// Push another StringOnStack.
+  /// Push another `StringOnStack`.
   pub fn push_self<const M: usize>(&mut self, s: StringOnStack<M>) {
     self.push_str(s.as_str());
   }

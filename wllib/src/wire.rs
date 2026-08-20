@@ -10,6 +10,7 @@
 /// Read a `u32` argument at `idx`. Returns 0 if `idx` is out of range rather than panicking, since
 /// wire data is untrusted input and this crate has no allocator to build a proper error path around
 /// every 4-byte read.
+#[must_use]
 pub fn read_u32(buf: &[u8], idx: usize) -> u32 {
   if idx + 4 <= buf.len() {
     let mut bytes = [0u8; 4];
@@ -21,11 +22,13 @@ pub fn read_u32(buf: &[u8], idx: usize) -> u32 {
 }
 
 /// Reads a u32 and returns it as an i32.
+#[must_use]
 pub fn read_i32(buf: &[u8], idx: usize) -> i32 {
   read_u32(buf, idx) as i32
 }
 
 /// Read a `u16` argument at `idx`.
+#[must_use]
 pub fn read_u16(buf: &[u8], idx: usize) -> u16 {
   if idx + 2 <= buf.len() {
     let mut bytes = [0u8; 2];
@@ -43,6 +46,7 @@ pub fn read_u16(buf: &[u8], idx: usize) -> u16 {
 /// the total number of bytes occupied by this argument (length prefix + padded string), so the
 /// caller can find the next argument at `idx + consumed`. Returns `None` if the string lenfth is 0
 /// or buffer doesn't hold the full string.
+#[must_use]
 pub fn read_str(buf: &[u8], idx: usize) -> Option<(&str, usize)> {
   let str_len = read_u32(buf, idx) as usize; // includes NUL terminator
   if str_len == 0 {
@@ -66,6 +70,7 @@ pub struct MessageHeader {
 }
 
 impl MessageHeader {
+  #[must_use]
   pub fn new(sender: u32, opcode: u16, size: u16) -> Self {
     Self {
       sender,
@@ -79,6 +84,7 @@ impl MessageHeader {
 ///
 /// Returns `None` if header doesn't fit, if `size` is smaller than header (malformed message),
 /// or if `size` would run past the end of `buf`.
+#[must_use]
 pub fn parse_header(buf: &[u8], idx: usize) -> Option<MessageHeader> {
   if idx + 8 > buf.len() {
     return None;
@@ -101,6 +107,7 @@ pub struct Message {
 
 impl Message {
   /// Create a new message targeting `obj_id` with request/event `opcode`
+  #[must_use]
   pub fn new(obj_id: u32, opcode: u16) -> Self {
     let header = MessageHeader::new(obj_id, opcode, 8);
     let mut msg = Self {
@@ -139,7 +146,7 @@ impl Message {
     let actual_len = s.len();
     let start = self.header.size as usize;
     if self.header.size + (actual_len as u16) < self.data.len() as u16 {
-      self.data[start..start + actual_len].copy_from_slice(&s.as_bytes());
+      self.data[start..start + actual_len].copy_from_slice(s.as_bytes());
       self.data[start + actual_len] = 0;
       self.header.size += actual_len as u16 + 1;
       self.header.size = (self.header.size + 3) & !3; // pad to 4-byte boundary
@@ -153,7 +160,7 @@ impl Message {
     let bytes = s.to_bytes_with_nul();
     let len = bytes.len() as u16;
 
-    self.write_u32(len as u32);
+    self.write_u32(u32::from(len));
 
     if self.header.size + len < self.data.len() as u16 {
       self.data[self.header.size as usize..(self.header.size + len) as usize]
@@ -164,6 +171,7 @@ impl Message {
     }
   }
 
+  #[must_use]
   pub fn as_bytes(&self) -> &[u8] {
     &self.data[..self.header.size as usize]
   }

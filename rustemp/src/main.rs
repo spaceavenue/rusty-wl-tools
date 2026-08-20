@@ -30,7 +30,7 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
     unsafe { libc::exit(1) };
   }
   let mut end_ptr = core::ptr::null_mut();
-  config.temp = unsafe { Some(libc::strtod(arg_ptr, &mut end_ptr)) };
+  config.temp = unsafe { Some(libc::strtod(arg_ptr, &raw mut end_ptr)) };
 
   if end_ptr == arg_ptr {
     AppError::InvalidTemp.write_diagnostic();
@@ -74,7 +74,7 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
   // main wayland event dispatch loop
   loop {
     match dispatch_once(&mut conn, &mut state) {
-      Ok(_) => (),
+      Ok(()) => (),
       Err(ConnectionClosed) => break,
       Err(e) => {
         e.write_diagnostic();

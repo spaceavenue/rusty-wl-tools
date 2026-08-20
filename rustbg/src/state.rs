@@ -40,8 +40,8 @@ pub struct Config {
 impl Default for Config {
   fn default() -> Self {
     Self {
-      image_path: Some(c"image.png".as_ptr() as *const libc::c_char),
-      namespace: c"wallpaper".as_ptr() as *const libc::c_char,
+      image_path: Some(c"image.png".as_ptr().cast::<libc::c_char>()),
+      namespace: c"wallpaper".as_ptr().cast::<libc::c_char>(),
       fill: false,
     }
   }
@@ -54,6 +54,7 @@ pub struct State {
   pub config: Config,
 }
 impl State {
+  #[must_use]
   pub fn init(config: Config) -> Self {
     Self {
       global: Global::default(),

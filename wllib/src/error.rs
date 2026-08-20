@@ -14,6 +14,7 @@ pub struct SysError {
 impl SysError {
   /// Capture the current `errno`, tagged with the name of the call that just failed. Called
   /// immediately after the failing libc call, before any other libc calls can clobber errno.
+  #[must_use]
   pub fn last(call: &'static str) -> Self {
     let errno = unsafe { *libc::__errno_location() };
     Self { call, errno }
@@ -33,6 +34,7 @@ pub struct ProtocolError {
   pub message: StringOnStack<MESSAGE_CAP>,
 }
 impl ProtocolError {
+  #[must_use]
   pub fn from(buf: &[u8], idx: usize) -> Self {
     let object_id = read_u32(buf, idx + 8);
     let code = read_u32(buf, idx + 12);

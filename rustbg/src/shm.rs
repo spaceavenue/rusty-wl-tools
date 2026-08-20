@@ -13,14 +13,14 @@ use crate::state::Config;
 pub fn get_image_fd(out_width: u32, out_height: u32, config: &Config) -> Result<i32, AppError> {
   if config.image_path.is_none() {
     return Err(AppError::MissingImagePath);
-  };
+  }
   let stride = out_width * 4; // 4 bytes per pixel (BGRA)
   let size = (stride * out_height) as usize;
 
   // create an anonymous, in-memory file.
   let fd = unsafe {
     libc::memfd_create(
-      c"rustbg-wayland-shm".as_ptr() as *const libc::c_char,
+      c"rustbg-wayland-shm".as_ptr().cast::<libc::c_char>(),
       libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING | libc::MFD_NOEXEC_SEAL,
     )
   };
@@ -54,10 +54,10 @@ pub fn get_image_fd(out_width: u32, out_height: u32, config: &Config) -> Result<
 
     // get a byte slice from the mmap, spawn dump-bgra/ffmpeg, fill the mmap'd region directly,
     // unmap file
-    let mmap_slice = slice::from_raw_parts_mut(mmap_ptr as *mut u8, size);
+    let mmap_slice = slice::from_raw_parts_mut(mmap_ptr.cast::<u8>(), size);
     let result = image_load::load_and_scale(out_width, out_height, mmap_slice, config);
     libc::munmap(mmap_ptr, size);
-    result?
+    result?;
   };
 
   Ok(fd)

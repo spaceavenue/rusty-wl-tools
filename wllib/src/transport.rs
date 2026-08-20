@@ -12,8 +12,8 @@ pub struct Connection {
 impl Connection {
   /// Connect to the Wayland socket.
   pub fn connect() -> Result<Self, WireError> {
-    let display = unsafe { libc::getenv(c"WAYLAND_DISPLAY".as_ptr() as *const libc::c_char) };
-    let runtime = unsafe { libc::getenv(c"XDG_RUNTIME_DIR".as_ptr() as *const libc::c_char) };
+    let display = unsafe { libc::getenv(c"WAYLAND_DISPLAY".as_ptr().cast::<libc::c_char>()) };
+    let runtime = unsafe { libc::getenv(c"XDG_RUNTIME_DIR".as_ptr().cast::<libc::c_char>()) };
     if display.is_null() || runtime.is_null() {
       return Err(WireError::Environment);
     }
@@ -56,7 +56,7 @@ impl Connection {
     let connect_res = unsafe {
       libc::connect(
         socket_fd,
-        &sun as *const libc::sockaddr_un as *const libc::sockaddr,
+        (&raw const sun).cast::<libc::sockaddr>(),
         mem::size_of::<libc::sockaddr_un>() as u32,
       )
     };
@@ -88,25 +88,25 @@ impl Connection {
       iov_len: msg_bytes.len(),
     };
     let mut msghdr = unsafe { mem::zeroed::<libc::msghdr>() };
-    msghdr.msg_iov = &mut iov;
+    msghdr.msg_iov = &raw mut iov;
     msghdr.msg_iovlen = 1 as _;
 
     // if no file descriptor needs to be passed, send a simple message
     let result = if let Some(f) = fd {
       // configure ancillary control buffer to pass the fd
       let mut cmsg_buf = [0u8; 24];
-      msghdr.msg_control = cmsg_buf.as_mut_ptr() as *mut libc::c_void;
+      msghdr.msg_control = cmsg_buf.as_mut_ptr().cast::<libc::c_void>();
       msghdr.msg_controllen = unsafe { libc::CMSG_SPACE(mem::size_of::<libc::c_int>() as _) };
 
-      let cmsg = unsafe { &mut *(libc::CMSG_FIRSTHDR(&msghdr)) };
+      let cmsg = unsafe { &mut *(libc::CMSG_FIRSTHDR(&raw const msghdr)) };
       cmsg.cmsg_level = libc::SOL_SOCKET;
       cmsg.cmsg_type = libc::SCM_RIGHTS;
       cmsg.cmsg_len =
         unsafe { libc::CMSG_LEN(mem::size_of::<libc::c_int>() as u32) as libc::c_uint };
-      unsafe { core::ptr::write(libc::CMSG_DATA(cmsg) as *mut libc::c_int, f) };
-      unsafe { libc::sendmsg(self.socket_fd, &msghdr, 0) }
+      unsafe { core::ptr::write(libc::CMSG_DATA(cmsg).cast::<libc::c_int>(), f) };
+      unsafe { libc::sendmsg(self.socket_fd, &raw const msghdr, 0) }
     } else {
-      unsafe { libc::sendmsg(self.socket_fd, &msghdr, 0) }
+      unsafe { libc::sendmsg(self.socket_fd, &raw const msghdr, 0) }
     };
 
     if result < 0 {
@@ -129,7 +129,7 @@ impl Connection {
     let bytes = unsafe {
       libc::recv(
         self.socket_fd,
-        buf.as_mut_ptr() as *mut libc::c_void,
+        buf.as_mut_ptr().cast::<libc::c_void>(),
         buf.len(),
         0,
       )
@@ -150,23 +150,23 @@ impl Connection {
     buf: &'a mut [u8],
   ) -> (Result<&'a [u8], WireError>, Option<libc::c_int>) {
     let mut iov = libc::iovec {
-      iov_base: buf.as_mut_ptr() as *mut libc::c_void,
+      iov_base: buf.as_mut_ptr().cast::<libc::c_void>(),
       iov_len: buf.len(),
     };
 
     // configure ancillary control buffer to receive the fd
     let mut cmsg_buf = [0u8; 24];
     let mut msghdr = unsafe { mem::zeroed::<libc::msghdr>() };
-    msghdr.msg_iov = &mut iov;
+    msghdr.msg_iov = &raw mut iov;
     msghdr.msg_iovlen = 1 as _;
-    msghdr.msg_control = cmsg_buf.as_mut_ptr() as *mut libc::c_void;
+    msghdr.msg_control = cmsg_buf.as_mut_ptr().cast::<libc::c_void>();
     msghdr.msg_controllen = unsafe { libc::CMSG_SPACE(mem::size_of::<libc::c_int>() as _) };
 
-    let bytes = unsafe { libc::recvmsg(self.socket_fd, &mut msghdr, 0) };
+    let bytes = unsafe { libc::recvmsg(self.socket_fd, &raw mut msghdr, 0) };
     let mut received_fd = None;
 
     let res = if bytes > 0 {
-      let cmsg = unsafe { libc::CMSG_FIRSTHDR(&msghdr) };
+      let cmsg = unsafe { libc::CMSG_FIRSTHDR(&raw const msghdr) };
       if !cmsg.is_null() {
         let cmsg_ref = unsafe { &*cmsg };
         if cmsg_ref.cmsg_level == libc::SOL_SOCKET && cmsg_ref.cmsg_type == libc::SCM_RIGHTS {

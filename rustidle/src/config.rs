@@ -75,7 +75,7 @@ impl Config {
         let argv = [
           c"/usr/bin/sh".as_ptr(),
           c"-c".as_ptr(),
-          self.raw.as_ptr().add(offset) as _,
+          self.raw.as_ptr().add(offset).cast(),
           core::ptr::null(),
         ];
         libc::execvp(argv[0], argv.as_ptr());
@@ -217,7 +217,7 @@ fn parse_decimal(bytes: &[u8]) -> Option<u32> {
     if !b.is_ascii_digit() {
       return None;
     }
-    val = val.checked_mul(10)?.checked_add((b - b'0') as u32)?;
+    val = val.checked_mul(10)?.checked_add(u32::from(b - b'0'))?;
   }
   Some(val)
 }
@@ -238,7 +238,7 @@ fn read_file(path: *const libc::c_char, buf: &mut [u8]) -> Result<usize, AppErro
       }
       let n = libc::read(
         fd,
-        buf.as_mut_ptr().add(offset) as *mut _,
+        buf.as_mut_ptr().add(offset).cast(),
         read_cap - offset,
       );
       match n {

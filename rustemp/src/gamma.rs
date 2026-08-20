@@ -84,7 +84,7 @@ pub fn get_gamma_table_fd(size: usize, temp_kelvin: f64) -> Result<i32, AppError
     return Err(AppError::Sys(err));
   }
 
-  let slice = unsafe { core::slice::from_raw_parts_mut(ptr as *mut u16, size * 3) };
+  let slice = unsafe { core::slice::from_raw_parts_mut(ptr.cast::<u16>(), size * 3) };
 
   // generate gamma curves scaled by the RGB color temperature factors
   for i in 0..size {

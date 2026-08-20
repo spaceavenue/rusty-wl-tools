@@ -126,7 +126,7 @@ impl EventHandler for State {
       if out.gamma_control_id != sender {
         return;
       }
-      State::handle_gamma_size(conn, out, &self.config, opcode, data)
+      State::handle_gamma_size(conn, out, &self.config, opcode, data);
     });
   }
 }

@@ -44,7 +44,7 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
         argv,
         optstring,
         LONGOPTS.as_ptr(),
-        &mut longindex,
+        &raw mut longindex,
       )
     };
     if c == -1 {
@@ -148,7 +148,7 @@ pub unsafe extern "C" fn main(argc: isize, argv: *const *mut libc::c_char) -> li
   // main wayland event dispatch loop
   loop {
     match dispatch_once(&mut conn, &mut state) {
-      Ok(_) => (),
+      Ok(()) => (),
       Err(ConnectionClosed) => break,
       Err(e) => {
         e.write_diagnostic();

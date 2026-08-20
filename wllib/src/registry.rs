@@ -32,6 +32,7 @@ pub fn bind(
 }
 
 /// Clamp a desired bind version down to what the compositor actually advertised.
+#[must_use]
 pub fn clamp_version(wanted: u32, advertised: u32) -> u32 {
   if advertised < wanted {
     advertised
