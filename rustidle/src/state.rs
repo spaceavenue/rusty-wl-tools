@@ -72,14 +72,18 @@ impl EventHandler for State {
       }
       match opcode {
         ext_idle_notification_v1::event::IDLED => {
-          if let Some(argv) = notif.entry.idle_argv {
-            self.config.spawn(argv);
+          if let Some(argv) = notif.entry.idle_argv
+            && let Err(e) = self.config.spawn(argv)
+          {
+            e.write_diagnostic();
           }
           return;
         }
         ext_idle_notification_v1::event::RESUMED => {
-          if let Some(argv) = notif.entry.resume_argv {
-            self.config.spawn(argv);
+          if let Some(argv) = notif.entry.resume_argv
+            && let Err(e) = self.config.spawn(argv)
+          {
+            e.write_diagnostic();
           }
           return;
         }

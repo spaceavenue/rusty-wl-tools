@@ -1,6 +1,6 @@
 use wllib::dispatch::EventHandler;
 use wllib::error::{SysError, WireError};
-use wllib::io::{write_stderr, write_stdout};
+use wllib::io::write_stdout;
 use wllib::protocols::{zwlr_data_control_device_v1, zwlr_data_control_offer_v1};
 use wllib::registry::{GlobalHandler, bind, clamp_version};
 use wllib::transport::Connection;
@@ -121,22 +121,40 @@ impl State {
     let mimes = &self.building_mimes[..self.building_mime_len];
     let classified = classify_offer_types(
       mimes,
-      self.wanted_mime.as_ref().map(wllib::fmt_lite::StringOnStack::as_str),
-      self.inferred_mime.as_ref().map(wllib::fmt_lite::StringOnStack::as_str),
+      self
+        .wanted_mime
+        .as_ref()
+        .map(wllib::fmt_lite::StringOnStack::as_str),
+      self
+        .inferred_mime
+        .as_ref()
+        .map(wllib::fmt_lite::StringOnStack::as_str),
     );
 
     let Some(selected_mime) = mime_type_to_request(
       &classified,
-      self.wanted_mime.as_ref().map(wllib::fmt_lite::StringOnStack::as_str),
-      self.inferred_mime.as_ref().map(wllib::fmt_lite::StringOnStack::as_str),
+      self
+        .wanted_mime
+        .as_ref()
+        .map(wllib::fmt_lite::StringOnStack::as_str),
+      self
+        .inferred_mime
+        .as_ref()
+        .map(wllib::fmt_lite::StringOnStack::as_str),
     ) else {
-      if classified.any.is_none() {
-        write_stderr(b"[wl-paste]: nothing is currently copied\n");
+      // route these through AppError rather than distinct inline write_stderr calls, both so the
+      // three cases share one place their wording lives) and so the message isn't hardcoded to
+      // "[wl-paste]:" even though this same code path also runs for wl-watch's
+      // Action::PipeToCommand. AppError's diagnostics use a binary-agnostic "rustclip:"
+      // prefix instead.
+      let err = if classified.any.is_none() {
+        AppError::NothingCopied
       } else if self.wanted_mime.is_some() {
-        write_stderr(b"[wl-paste]: clipboard content is not available as requested type\n");
+        AppError::MimeNotAvailable
       } else {
-        write_stderr(b"[wl-paste]: clipboard content is not available as inferred output type\n");
-      }
+        AppError::InferredMimeNotAvailable
+      };
+      err.write_diagnostic();
       if matches!(&self.action, Action::PipeToCommand { .. }) {
         return;
       }
@@ -146,7 +164,9 @@ impl State {
     match fetch_offer(conn, offer_id, &selected_mime) {
       Ok(read_fd) => match &self.action {
         Action::PrintAndExit => {
-          stream_fd_to_stdout(read_fd);
+          if let Err(e) = stream_fd_to_stdout(read_fd) {
+            e.write_diagnostic();
+          }
           if !self.no_newline && is_text_mime(selected_mime.as_str()) {
             write_stdout(b"\n");
           }
@@ -237,18 +257,21 @@ fn fetch_offer(
 }
 
 // stream `read_fd` to stdout until EOF in fixed-size chunks. clipboard content isn't assumed to
-// fit in memory all at once.
-fn stream_fd_to_stdout(read_fd: libc::c_int) {
+// fit in memory all at once. distinguishes a genuine read/write failure from clean EOF so the
+// caller can report it.
+fn stream_fd_to_stdout(read_fd: libc::c_int) -> Result<(), AppError> {
   let mut buf = [0u8; 8192];
   loop {
     let n = unsafe { libc::read(read_fd, buf.as_mut_ptr().cast(), buf.len()) };
-    if n <= 0 {
-      break;
-    }
-    if wllib::io::write_fd(1, &buf[..n as usize], None).is_err() {
-      break;
+    match n {
+      0 => break,
+      n if n > 0 => {
+        wllib::io::write_fd(1, &buf[..n as usize], None).map_err(AppError::Sys)?;
+      }
+      _ => return Err(AppError::Sys(SysError::last("read"))),
     }
   }
+  Ok(())
 }
 
 // fork, wire `read_fd` up as the child's stdin, set CLIPBOARD_STATE and CLIPBOARD_TYPE, and exec

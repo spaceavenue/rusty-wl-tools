@@ -17,7 +17,7 @@
 //
 // command tokens are stored as *offsets* into the raw file buffer, not raw pointers.
 
-use wllib::error::{SysError, WireError};
+use wllib::error::SysError;
 
 use crate::error::AppError;
 
@@ -63,13 +63,14 @@ impl Config {
 
   // fork and exec the command described by `offsets`. we set `SIGCHLD` to `SIG_IGN` at startup, so
   // the kernel reaps the child automatically. no `waitpid` needed here and no zombie accumulates
-  // even if this fires repeatedly over a long uptime.
-  pub fn spawn(&self, offset: usize) {
+  // even if this fires repeatedly over a long uptime. returns the fork failure to the caller
+  // instead of reporting it inline, so IDLED/RESUMED dispatch in state.rs is the one place that
+  // decides how a spawn failure gets surfaced.
+  pub fn spawn(&self, offset: usize) -> Result<(), AppError> {
     unsafe {
       let pid = libc::fork();
       if pid < 0 {
-        WireError::Sys(SysError::last("fork")).write_diagnostic();
-        return;
+        return Err(AppError::Sys(SysError::last("fork")));
       }
       if pid == 0 {
         let argv = [
@@ -83,6 +84,7 @@ impl Config {
         libc::_exit(1);
       }
     }
+    Ok(())
   }
 
   fn parse(&mut self, len: usize) {
@@ -152,6 +154,15 @@ impl Config {
       let Some(timeout_s) = parse_decimal(str_at(&self.raw, tok_offsets[1])) else {
         continue;
       };
+      // a genuinely unparseable token (empty, non-digit, overflowing) is treated the same as an
+      // unrecognized keyword or too-few-tokens line above: skipped without comment, since that's
+      // this parser's general tolerance for malformed lines. a *successfully parsed* value of 0
+      // is a different kind of mistake. it's syntactically fine but not a usable timeout, so
+      // it's worth telling the user about.
+      if timeout_s == 0 {
+        AppError::InvalidTimeout.write_diagnostic();
+        continue;
+      }
       let cmd_offset = tok_offsets[2];
 
       let Some(entry) = self.create(timeout_s * 1000, is_timeout) else {
@@ -236,11 +247,7 @@ fn read_file(path: *const libc::c_char, buf: &mut [u8]) -> Result<usize, AppErro
       if offset >= read_cap {
         break;
       }
-      let n = libc::read(
-        fd,
-        buf.as_mut_ptr().add(offset).cast(),
-        read_cap - offset,
-      );
+      let n = libc::read(fd, buf.as_mut_ptr().add(offset).cast(), read_cap - offset);
       match n {
         n if n > 0 => offset += n as usize,
         0 => break,

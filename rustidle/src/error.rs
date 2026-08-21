@@ -6,9 +6,7 @@ pub enum AppError {
   Wire(WireError),
   // A libc syscall outside the wayland socket failed (memfd_create, mmap, pipe2, fork, ...).
   Sys(SysError),
-  // Command failed to execute.
-  CommandFailed,
-  // Invalid timeout provided (-ve, 0, not found etc.)
+  // A `timeout <s> ...` config line parsed a value of 0 seconds.
   InvalidTimeout,
 }
 
@@ -17,7 +15,6 @@ impl AppError {
     match self {
       AppError::Wire(e) => e.write_diagnostic(),
       AppError::Sys(e) => WireError::Sys(*e).write_diagnostic(),
-      AppError::CommandFailed => write_stderr("Command failed to execute\n"),
       AppError::InvalidTimeout => write_stderr("Timeout must be at least 1s\n"),
     }
   }
