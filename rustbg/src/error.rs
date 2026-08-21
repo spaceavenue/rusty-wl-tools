@@ -1,5 +1,5 @@
 use wllib::error::{SysError, WireError};
-use wllib::fmt_lite;
+use wllib::io;
 
 // Application-level errors.
 //
@@ -22,14 +22,14 @@ impl AppError {
       AppError::Wire(e) => e.write_diagnostic(),
       AppError::Sys(e) => WireError::Sys(*e).write_diagnostic(),
       #[cfg(feature = "ffmpeg")]
-      AppError::ImageDecodeError => fmt_lite::write_stderr(
+      AppError::ImageDecodeError => io::write_stderr(
         "[rustbg] image decode error: ffmpeg produced fewer bytes than expected\n",
       ),
       #[cfg(not(feature = "ffmpeg"))]
-      AppError::ImageDecodeError => fmt_lite::write_stderr(
+      AppError::ImageDecodeError => io::write_stderr(
         "[rustbg] image decode error: dump-bgra produced fewer bytes than expected\n",
       ),
-      AppError::MissingImagePath => fmt_lite::write_stderr("[rustbg] no image path configured\n"),
+      AppError::MissingImagePath => io::write_stderr("[rustbg] no image path configured\n"),
     }
   }
 }

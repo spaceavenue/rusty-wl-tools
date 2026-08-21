@@ -1,5 +1,5 @@
 use wllib::error::{SysError, WireError};
-use wllib::fmt_lite;
+use wllib::io;
 
 pub enum AppError {
   Wire(WireError),
@@ -12,7 +12,7 @@ impl AppError {
     match self {
       AppError::Wire(e) => e.write_diagnostic(),
       AppError::Sys(e) => WireError::Sys(*e).write_diagnostic(),
-      AppError::InvalidTemp => fmt_lite::write_stderr("[rustemp] invalid temperature\n"),
+      AppError::InvalidTemp => io::write_stderr("[rustemp] invalid temperature\n"),
     }
   }
 }

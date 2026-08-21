@@ -1,5 +1,6 @@
 use wllib::dispatch::EventHandler;
-use wllib::fmt_lite::{StringOnStack, write_stderr, write_stdout};
+use wllib::fmt_lite::StringOnStack;
+use wllib::io::{write_stderr, write_stdout};
 use wllib::protocols::{wl_output, zxdg_output_manager_v1, zxdg_output_v1};
 use wllib::registry::{GlobalHandler, bind, clamp_version};
 use wllib::transport::Connection;

@@ -1,10 +1,8 @@
-//! Formatting methods due to absence of `core::fmt` and heap allocations.
-//! There are also convenience methods, such as for writing to file descriptors, and methods for
-//! writing to stderr and stdout.
+//! Formatting methods due to absence of `core::fmt` and heap allocations: a fixed-capacity,
+//! stack-allocated string builder ([`StringOnStack`]) and the [`FmtLite`] trait it's built
+//! around.
 
 use core::ffi::CStr;
-
-use crate::error::SysError;
 
 /// Lightweight formatter trait in absence of `core::fmt`.
 pub trait FmtLite {
@@ -65,6 +63,7 @@ pub struct StringOnStack<const N: usize> {
   buf: [u8; N],
   len: usize,
 }
+
 impl<const N: usize> StringOnStack<N> {
   /// Create an empty string.
   #[must_use]
@@ -147,6 +146,11 @@ impl<const N: usize> StringOnStack<N> {
   /// Push a string slice, silently truncating at character boundaries if capacity is exceeded.
   pub fn push_str(&mut self, s: &str) -> &mut Self {
     let space = self.remaining_capacity();
+    // start from the largest byte count that could possibly fit, then walk backwards to the
+    // nearest char boundary. `s` is a valid `&str` already, so `n` bytes of it are only safe to
+    // copy verbatim if `n` doesn't stop in the middle of a multi-byte UTF-8 sequence.
+    // `is_char_boundary` is O(1) (just checks whether byte `n` is a continuation byte), so this
+    // walk is bounded by at most 3 steps back (the longest UTF-8 sequence is 4 bytes).
     let mut n = s.len().min(space);
     while !s.is_char_boundary(n) {
       n -= 1;
@@ -163,16 +167,26 @@ impl<const N: usize> StringOnStack<N> {
     self
   }
 
+  /// Push a `CStr`'s content (excluding its own NUL terminator), silently truncating at a valid
+  /// UTF-8 boundary if capacity is exceeded or the content isn't UTF-8 at all past some point.
   pub fn push_cstr(&mut self, s: &CStr) -> &mut Self {
     let space = self.remaining_capacity();
     if space == 0 {
       return self;
     }
 
+    // unlike `push_str`, the source here is an arbitrary `&[u8]` (a C string's content has no
+    // UTF-8 guarantee at all), so this can't just walk backwards from a byte count the way
+    //`push_str` does; it has to actually validate. `space`-truncate first, purely to keep
+    // `from_utf8` from doing wasted work validating bytes we could never store anyway.
     let bytes = s.to_bytes();
     let max_len = bytes.len().min(space);
     let slice = &bytes[..max_len];
 
+    // `from_utf8` on the slice either says it's all valid, or hands back exactly how many leading
+    // bytes *were* valid before the first bad byte. `valid_up_to()` is precisely the boundary
+    // `push_str`'s `is_char_boundary` walk computes by hand, just derived from validation instead
+    // of backing off a known-good string.
     let n = match str::from_utf8(slice) {
       Ok(valid) => valid.len(),
       Err(err) => err.valid_up_to(),
@@ -203,10 +217,17 @@ impl<const N: usize> StringOnStack<N> {
 
   /// Push an unsigned 64-bit integer formatted in base 10.
   pub fn push_u64(&mut self, mut num: u64) -> &mut Self {
+    // the loop below never executes for 0 (the `while num > 0` guard), which would otherwise
+    // push an empty string instead of "0".
     if num == 0 {
       return self.push_str("0");
     }
     let mut tmp = [0u8; 20]; // u64::MAX is 20 decimal digits
+
+    // digits come out of `num % 10` least-significant-first, but the formatted string needs
+    // them most-significant-first. rather than building forward and reversing, `idx` walks
+    // `tmp` backwards from the end so the digits land in the right order the first time and
+    // `&tmp[idx..]` is already the correctly-ordered string once the loop stops.
     let mut idx = 20;
     while num > 0 {
       idx -= 1;
@@ -289,45 +310,4 @@ impl<const N: usize> From<&CStr> for StringOnStack<N> {
     s.push(value);
     s
   }
-}
-
-/// Writes the buffer to the file descriptor.
-pub fn write_fd(
-  fd: libc::c_int,
-  msg: impl AsRef<[u8]>,
-  count: Option<usize>,
-) -> Result<(), SysError> {
-  let msg = msg.as_ref();
-  let len = match count {
-    Some(c) => c.clamp(1, msg.len()),
-    None => msg.len(),
-  };
-  let mut msg = &msg[..len];
-  while !msg.is_empty() {
-    let res = unsafe { libc::write(fd, msg.as_ptr().cast::<libc::c_void>(), msg.len()) };
-    match res {
-      0 => break,
-      res if res > 0 => {
-        msg = &msg[res as usize..];
-      }
-      _ => {
-        let err = SysError::last("write");
-        if err.errno == libc::EINTR {
-          continue;
-        }
-        return Err(err);
-      }
-    }
-  }
-  Ok(())
-}
-
-/// Writes the buffer to stderr.
-pub fn write_stderr(msg: impl AsRef<[u8]>) {
-  let _ = write_fd(2, msg, None);
-}
-
-/// Writes the buffer to stdout.
-pub fn write_stdout(msg: impl AsRef<[u8]>) {
-  let _ = write_fd(1, msg, None);
 }

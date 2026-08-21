@@ -9,7 +9,7 @@ pub mod state;
 use wllib::cli;
 use wllib::dispatch::dispatch_once;
 use wllib::error::WireError::ConnectionClosed;
-use wllib::fmt_lite::write_stderr;
+use wllib::io::write_stderr;
 use wllib::protocols::{wl_compositor, wl_surface, zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 use wllib::registry::crawl;
 use wllib::transport::Connection;

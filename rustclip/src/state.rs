@@ -1,6 +1,6 @@
 use wllib::dispatch::EventHandler;
 use wllib::error::{SysError, WireError};
-use wllib::fmt_lite::{write_stderr, write_stdout};
+use wllib::io::{write_stderr, write_stdout};
 use wllib::protocols::{zwlr_data_control_device_v1, zwlr_data_control_offer_v1};
 use wllib::registry::{GlobalHandler, bind, clamp_version};
 use wllib::transport::Connection;
@@ -245,7 +245,7 @@ fn stream_fd_to_stdout(read_fd: libc::c_int) {
     if n <= 0 {
       break;
     }
-    if wllib::fmt_lite::write_fd(1, &buf[..n as usize], None).is_err() {
+    if wllib::io::write_fd(1, &buf[..n as usize], None).is_err() {
       break;
     }
   }

@@ -7,7 +7,7 @@ pub mod state;
 
 use wllib::dispatch::dispatch_once;
 use wllib::error::WireError::ConnectionClosed;
-use wllib::fmt_lite::write_stderr;
+use wllib::io::write_stderr;
 use wllib::protocols::ext_idle_notifier_v1;
 use wllib::registry::crawl;
 use wllib::transport::Connection;

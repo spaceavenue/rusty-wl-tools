@@ -1,6 +1,7 @@
 //! Error types for the transport/protocol layer.
 
-use crate::fmt_lite::{StringOnStack, write_stderr};
+use crate::fmt_lite::StringOnStack;
+use crate::io::write_stderr;
 use crate::wire::{read_str, read_u32};
 
 /// A failed libc call, captured with `errno` at the point of failure.

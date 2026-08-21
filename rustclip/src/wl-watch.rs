@@ -5,7 +5,7 @@ use rustclip::mime::MimeType;
 use rustclip::state::{Action, State};
 use wllib::cli;
 use wllib::dispatch::dispatch_once;
-use wllib::fmt_lite::write_stderr;
+use wllib::io::write_stderr;
 use wllib::protocols::zwlr_data_control_manager_v1;
 use wllib::registry::crawl;
 use wllib::transport::Connection;

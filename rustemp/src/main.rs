@@ -8,7 +8,7 @@ mod state;
 use state::{Config, State};
 use wllib::dispatch::dispatch_once;
 use wllib::error::WireError::ConnectionClosed;
-use wllib::fmt_lite::write_stderr;
+use wllib::io::write_stderr;
 use wllib::protocols::zwlr_gamma_control_manager_v1;
 use wllib::registry::crawl;
 use wllib::transport::Connection;

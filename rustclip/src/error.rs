@@ -1,5 +1,5 @@
 use wllib::error::{SysError, WireError};
-use wllib::fmt_lite::write_stderr;
+use wllib::io::write_stderr;
 
 pub enum AppError {
   Wire(WireError),

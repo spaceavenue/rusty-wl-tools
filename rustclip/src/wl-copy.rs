@@ -9,16 +9,17 @@
 
 use rustclip::error::AppError;
 use rustclip::mime::{self, GENERIC_TEXT_OFFERS, MimeType};
+use wllib::cli;
 use wllib::dispatch::EventHandler;
 use wllib::error::{SysError, WireError};
-use wllib::fmt_lite::{StringOnStack, write_stderr};
+use wllib::fmt_lite::StringOnStack;
+use wllib::io::{write_fd, write_stderr};
 use wllib::protocols::{
   zwlr_data_control_device_v1, zwlr_data_control_manager_v1, zwlr_data_control_source_v1,
 };
 use wllib::registry::{GlobalHandler, bind, clamp_version, crawl};
 use wllib::transport::Connection;
 use wllib::wire::{Message, parse_header};
-use wllib::{cli, fmt_lite};
 
 #[derive(Default)]
 struct Global {
@@ -301,7 +302,7 @@ fn write_content_to_fd(
     let n = unsafe { libc::read(source_fd, chunk.as_mut_ptr().cast(), chunk.len()) };
     match n {
       n if n > 0 => {
-        fmt_lite::write_fd(target_fd, &chunk[..n as usize], None).map_err(AppError::Sys)?;
+        write_fd(target_fd, &chunk[..n as usize], None).map_err(AppError::Sys)?;
       }
       0 => break,
       _ => return Err(AppError::Sys(SysError::last("read"))),
@@ -327,11 +328,11 @@ fn write_args_to_fd(
 ) -> Result<(), AppError> {
   for i in start..argc {
     if i > start {
-      fmt_lite::write_fd(fd, b" ", Some(1)).map_err(AppError::Sys)?;
+      write_fd(fd, b" ", Some(1)).map_err(AppError::Sys)?;
     }
     let arg = unsafe { *argv.add(i) };
     let bytes = unsafe { core::ffi::CStr::from_ptr(arg) }.to_bytes();
-    fmt_lite::write_fd(fd, bytes, None).map_err(AppError::Sys)?;
+    write_fd(fd, bytes, None).map_err(AppError::Sys)?;
   }
   Ok(())
 }

@@ -1,5 +1,5 @@
 use wllib::dispatch::EventHandler;
-use wllib::fmt_lite::write_stderr;
+use wllib::io::write_stderr;
 use wllib::protocols::{wl_shm, wl_shm_pool, wl_surface, zwlr_layer_surface_v1};
 use wllib::registry::{GlobalHandler, bind, clamp_version};
 use wllib::transport::Connection;
