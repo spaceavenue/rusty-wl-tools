@@ -122,6 +122,9 @@ impl Connection {
       cmsg.cmsg_type = libc::SCM_RIGHTS;
       cmsg.cmsg_len =
         unsafe { libc::CMSG_LEN(mem::size_of::<libc::c_int>() as u32) as libc::c_uint };
+      // `CMSG_DATA` points just past the header to where its payload starts, so we write the actual
+      // fd number there. this is the one line that hands `f` over to the kernel; everything
+      // else in this branch is just describing the shape of that handoff.
       unsafe { core::ptr::write(libc::CMSG_DATA(cmsg).cast::<libc::c_int>(), f) };
       unsafe { libc::sendmsg(self.socket_fd, &raw const msghdr, 0) }
     } else {
@@ -237,10 +240,18 @@ impl Connection {
     let mut received_fd = None;
 
     let res = if bytes > 0 {
+      // the kernel decides whether any ancillary data actually arrived. a `recvmsg` that got a
+      // plain data-only message returns a null cmsg pointer, not a header describing zero bytes of
+      // payload.
       let cmsg = unsafe { libc::CMSG_FIRSTHDR(&raw const msghdr) };
       if !cmsg.is_null() {
         let cmsg_ref = unsafe { &*cmsg };
+        // confirm this is actually the SCM_RIGHTS ancillary data this method expects before
+        // trusting its payload as an fd.
         if cmsg_ref.cmsg_level == libc::SOL_SOCKET && cmsg_ref.cmsg_type == libc::SCM_RIGHTS {
+          // `CMSG_DATA`'s returned pointer is only guaranteed aligned to the cmsg header's own
+          // alignment, not necessarily to `c_int`'s. reading through an ordinary `*const
+          // libc::c_int` reference would be UB if the two don't happen to coincide.
           let fd_ptr = unsafe { libc::CMSG_DATA(cmsg) } as *const libc::c_int;
           received_fd = Some(unsafe { core::ptr::read_unaligned(fd_ptr) });
         }
