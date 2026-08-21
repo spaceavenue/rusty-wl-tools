@@ -2,7 +2,7 @@
 This is a small collection of rust-based wayland utilities.
 
 ## rustbg
-Sets the wallpaper using the wlr-layer-shell protocol. Image loading and decoding is handled by [dump-bgra](https://codeberg.org/spaceavenue/dump-bgra) (a tool I created specifically to dump bgra pixels as fast as possible. yknow. for Speed(tm)). You need to have it installed on your system for the wallpaper to work. If you don't want to, you can build with `--feature ffmpeg` to use ffmpeg instead. The rest is the same.
+Sets the wallpaper using the wlr-layer-shell protocol. Image loading and decoding is handled by [dump-bgra](https://github.com/spaceavenue/dump-bgra) (a tool I created specifically to dump bgra pixels as fast as possible. yknow. for Speed(tm)). You need to have it installed on your system for the wallpaper to work. If you don't want to, you can build with `--feature ffmpeg` to use ffmpeg instead. The rest is the same.
 Use `-f` to fill/center-crop the wallpaper, omit for a "fit" mode where the empty space is padded with black pixels. Supply the layer namespace with `-n <name>`. Mandatory argument: the image path. 
 
 ## rustemp
@@ -13,8 +13,10 @@ An idle management daemon using the ext-idle-notify-v1 protocol.
 Reads a config file and parses the entries to create timers. Entry format: `timeout <time in seconds> <command>` or `resume <time in seconds> <command>`. Command is passed verbatim to `sh -c`.
 Use `resume` for executing a command on resume. This can be paired with a `timeout` entry by providing the same time for both.
 
-## wllib
-The underlying library. Contains the "talk to wayland" stuff. Previously it was tightly integrated with `rustbg` but I abstracted it because i wanted to use it in other utils as well (mostly `rustidle`).
+## rust-randr
+A `wlr-randr`-like utility. Just dumps output info.
+
+---
 
 Everything is statically linked with musl, so you need to have the musl target available to build, and uses `#![no_std]` to completely eliminate the stdlib from the binary. Thus it also uses no external crates like `wayland-client` or even `wayland-sys`, and relies solely on reading from and writing to the wayland socket to communicate with the server.
 

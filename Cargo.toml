@@ -2,7 +2,7 @@ cargo-features = ["panic-immediate-abort"]
 
 [workspace]
 resolver = "2"
-members = ["wllib", "rustbg", "rustemp", "rustidle", "rustclip", "rust-randr"]
+members = ["rustbg", "rustemp", "rustidle", "rust-randr"]
 
 [profile.dev]
 panic = "immediate-abort"
@@ -11,6 +11,5 @@ panic = "immediate-abort"
 opt-level = "z"
 lto = "fat"
 codegen-units = 1
-debug = "none"
 strip = true
 panic = "immediate-abort"
