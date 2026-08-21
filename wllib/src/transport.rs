@@ -115,13 +115,26 @@ impl Connection {
       // `CMSG_SPACE` (unlike `CMSG_LEN` below) includes the alignment padding after the payload,
       // not just the header+payload themselves. `msg_controllen` describes how much of
       // `cmsg_buf` the kernel is allowed to touch, so it needs the padded figure.
-      msghdr.msg_controllen = unsafe { libc::CMSG_SPACE(mem::size_of::<libc::c_int>() as _) };
+      //
+      // `CMSG_SPACE`/`CMSG_LEN` return `libc::c_uint` on musl but `msg_controllen`/`cmsg_len` are
+      // `usize` on glibc. `try_into` is a genuine widening conversion there, just a no-op on musl
+      // (hence the `allow`, not a removal).
+      #[allow(clippy::useless_conversion)]
+      {
+        msghdr.msg_controllen = unsafe { libc::CMSG_SPACE(mem::size_of::<libc::c_int>() as _) }
+          .try_into()
+          .unwrap();
+      }
 
       let cmsg = unsafe { &mut *(libc::CMSG_FIRSTHDR(&raw const msghdr)) };
       cmsg.cmsg_level = libc::SOL_SOCKET;
       cmsg.cmsg_type = libc::SCM_RIGHTS;
-      cmsg.cmsg_len =
-        unsafe { libc::CMSG_LEN(mem::size_of::<libc::c_int>() as u32) as libc::c_uint };
+      #[allow(clippy::useless_conversion)]
+      {
+        cmsg.cmsg_len = unsafe { libc::CMSG_LEN(mem::size_of::<libc::c_int>() as u32) }
+          .try_into()
+          .unwrap();
+      }
       // `CMSG_DATA` points just past the header to where its payload starts, so we write the actual
       // fd number there. this is the one line that hands `f` over to the kernel; everything
       // else in this branch is just describing the shape of that handoff.
@@ -234,8 +247,13 @@ impl Connection {
     msghdr.msg_iov = &raw mut iov;
     msghdr.msg_iovlen = 1 as _;
     msghdr.msg_control = cmsg_buf.as_mut_ptr().cast::<libc::c_void>();
-    msghdr.msg_controllen = unsafe { libc::CMSG_SPACE(mem::size_of::<libc::c_int>() as _) };
-
+    // see the matching comment in `send`.
+    #[allow(clippy::useless_conversion)]
+    {
+      msghdr.msg_controllen = unsafe { libc::CMSG_SPACE(mem::size_of::<libc::c_int>() as _) }
+        .try_into()
+        .unwrap();
+    }
     let bytes = unsafe { libc::recvmsg(self.socket_fd, &raw mut msghdr, 0) };
     let mut received_fd = None;
 
